@@ -1,4 +1,5 @@
 import type { GenerationParams, StylePreset } from "./types.js";
+import { genreInferencePriors } from "./genre-library.js";
 import { toNumber } from "../util/coerce.js";
 
 export interface ExpressionKnobs {
@@ -16,6 +17,10 @@ export interface ExpressionKnobs {
   rigidity: number;
   /** Nucleus top-p for ONNX sampling (lower = more focused). */
   nucleusTopP: number;
+  /** 0–1 ONNX logit penalty for out-of-scale pitch classes. */
+  scaleLockStrength: number;
+  durationChoices: number[];
+  durationWeights: number[];
 }
 
 const DEFAULT_EXPRESSION = 0.5;
@@ -43,6 +48,7 @@ export function resolveExpression(params: GenerationParams): ExpressionKnobs {
   const style = params.stylePreset ?? DEFAULT_STYLE;
   const temperature = Math.max(0.1, toNumber(params.temperature, 0.7));
   const rigidity = resolveRigidity(params);
+  const genre = genreInferencePriors(params.genre);
 
   let restResampleProb = 0.08 + expression * 0.22;
   let repeatPitchPenalty = 2.0 + expression * 2.0;
@@ -82,18 +88,32 @@ export function resolveExpression(params: GenerationParams): ExpressionKnobs {
     maxPolyphonyPerSlot = Math.min(maxPolyphonyPerSlot, style === "dense" ? 3 : 1);
   }
 
+  const sampleTemperature =
+    temperature * (0.85 + expression * 0.45) * genre.temperatureMult;
+  const nucleusTopPClamped = Math.max(
+    0.75,
+    Math.min(0.98, nucleusTopP * genre.nucleusTopP / 0.9),
+  );
+  const scaleLockStrength = Math.min(
+    1,
+    genre.scaleLockStrength * (0.55 + rigidity * 0.45),
+  );
+
   return {
-    restResampleProb,
-    repeatPitchPenalty,
+    restResampleProb: restResampleProb * genre.restResampleMult,
+    repeatPitchPenalty: repeatPitchPenalty * genre.repeatPitchPenaltyMult,
     sustainRepeatPenalty,
     maxMelodyNoteDuration: Math.max(1.0, maxMelodyNoteDuration),
     harmonyDensity,
     hybridAccompaniment,
     ghostNoteChance,
-    sampleTemperature: temperature * (0.85 + expression * 0.45),
+    sampleTemperature: Math.max(0.1, sampleTemperature),
     maxPolyphonyPerSlot,
     maxSixteenthsPerBar,
     rigidity,
-    nucleusTopP: Math.max(0.75, Math.min(0.98, nucleusTopP)),
+    nucleusTopP: nucleusTopPClamped,
+    scaleLockStrength,
+    durationChoices: genre.durationChoices,
+    durationWeights: genre.durationWeights,
   };
 }

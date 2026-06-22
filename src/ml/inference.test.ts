@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { generateMelody, isModelLoaded } from "./inference.js";
 import { allNotesOnGrid, gridStepBeats, maxNotesPerSlot } from "./grid-quantize.js";
+import { isPitchInScale } from "./melody-engine.js";
 import { maxContinuousSamePitchBeats } from "./post-process.js";
 import { maxConsecutiveSamePitch } from "./taste-filter.js";
 import type { GenerationParams } from "./types.js";
@@ -141,6 +142,24 @@ describe("inference", () => {
     });
     expect(allNotesOnGrid(result.notes, gridStep)).toBe(true);
     expect(maxNotesPerSlot(result.notes, gridStep)).toBeLessThanOrEqual(1);
+  });
+
+  it("8-bar output keeps lead notes in selected scale", async () => {
+    const result = await generateMelody({
+      ...params,
+      generationMode: "melody",
+      bars: 8,
+      key: "G",
+      scale: "mixolydian",
+      stylePreset: "clean",
+      rigidity: 0.9,
+      seed: 55123,
+    });
+    const lead = result.notes.filter((n) => n.velocity >= 55);
+    expect(lead.length).toBeGreaterThan(0);
+    for (const n of lead) {
+      expect(isPitchInScale(n.pitch, "G", "mixolydian")).toBe(true);
+    }
   });
 
   it("8-bar dense hybrid does not stack more than four notes per slot", async () => {

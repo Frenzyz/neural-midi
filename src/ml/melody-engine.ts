@@ -206,3 +206,17 @@ export function nearestScaleIndex(pitches: number[], midi: number): number {
 export function quantizeBeat(beat: number, grid = 0.25): number {
   return Math.round(beat / grid) * grid;
 }
+
+/** Pitch classes (0–11) valid for key + scale. */
+export function pitchClassesInScale(key: string, scale: Scale): number[] {
+  const rootPc = NOTE_TO_PC[key] ?? 0;
+  const intervals = SCALE_INTERVALS[scale] ?? SCALE_INTERVALS.major;
+  return intervals.map((i) => (rootPc + i) % 12);
+}
+
+export function isPitchInScale(pitch: number, key: string, scale: Scale): boolean {
+  const rootPc = NOTE_TO_PC[key] ?? 0;
+  const rel = (pitch % 12 - rootPc + 12) % 12;
+  const intervals = SCALE_INTERVALS[scale] ?? SCALE_INTERVALS.major;
+  return intervals.includes(rel);
+}

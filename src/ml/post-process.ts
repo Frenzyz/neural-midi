@@ -2,12 +2,13 @@ import type { ChordEvent, GenerationParams, MidiNote, Scale } from "./types.js";
 import { chordAtBeat } from "./chords.js";
 import { genreEntry } from "./genre-library.js";
 import { addGhostNotes, applySwing, applyVelocityHumanize } from "./humanize.js";
-import { mergeVoices } from "./pattern-engine.js";
+import { enforcePhraseStructure, mergeVoices } from "./pattern-engine.js";
 import { mulberry32 } from "./melody-engine.js";
 import {
   NOTE_TO_PC,
   SCALE_INTERVALS,
   buildScalePitches,
+  isPitchInScale,
   nearestScaleIndex,
   quantizeBeat,
 } from "./melody-engine.js";
@@ -19,6 +20,7 @@ export type ArticulationType = "lead" | "pluck";
 
 const GRID = 0.25;
 const LEAD_VELOCITY_MIN = 55;
+const PHRASE_BARS = 4;
 
 function snapToScale(pitch: number, rootPc: number, scale: Scale, minMidi = 48, maxMidi = 84): number {
   const intervals = SCALE_INTERVALS[scale] ?? SCALE_INTERVALS.major;
@@ -60,6 +62,94 @@ function dedupeIdentical(notes: MidiNote[]): MidiNote[] {
     out.push(n);
   }
   return out.sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
+}
+
+/** Resolve cadence target pitch — tonic near phrase midpoint register. */
+export function cadencePitch(
+  pitches: number[],
+  rootPc: number,
+  intervals: number[],
+  referencePitch: number,
+): number {
+  const tonicPc = (rootPc + intervals[0]!) % 12;
+  const candidates = pitches.filter((p) => (p % 12) === tonicPc);
+  if (candidates.length === 0) {
+    const octave = Math.round(referencePitch / 12);
+    return octave * 12 + tonicPc;
+  }
+  return candidates.reduce((best, p) =>
+    Math.abs(p - referencePitch) < Math.abs(best - referencePitch) ? p : best,
+  );
+}
+
+/** Trim lead notes bleeding past 4/8-bar phrase boundaries; cadence at each phrase end. */
+export function alignPhraseBoundaries(
+  notes: MidiNote[],
+  pitches: number[],
+  rootPc: number,
+  scale: Scale,
+  beatsPerBar: number,
+  bars: number,
+): MidiNote[] {
+  if (notes.length === 0 || beatsPerBar <= 0) return notes;
+
+  const intervals = SCALE_INTERVALS[scale] ?? SCALE_INTERVALS.major;
+  const phraseCount = Math.max(1, Math.ceil(bars / PHRASE_BARS));
+  const harmony = notes.filter((n) => n.velocity < LEAD_VELOCITY_MIN);
+  const lead = notes
+    .filter((n) => n.velocity >= LEAD_VELOCITY_MIN)
+    .map((n) => ({ ...n }))
+    .sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
+
+  for (let phrase = 0; phrase < phraseCount; phrase++) {
+    const phraseStart = phrase * PHRASE_BARS * beatsPerBar;
+    const phraseEnd = Math.min(bars * beatsPerBar, phraseStart + PHRASE_BARS * beatsPerBar);
+
+    for (const note of lead) {
+      const noteEnd = note.startTime + note.duration;
+      if (note.startTime >= phraseEnd - 0.001) continue;
+      if (noteEnd > phraseEnd + 0.001) {
+        const trimmed = quantizeBeat(phraseEnd - note.startTime, GRID);
+        if (trimmed >= GRID) {
+          note.duration = trimmed;
+        }
+      }
+    }
+
+    const inPhrase = lead.filter(
+      (n) => n.startTime >= phraseStart - 0.001 && n.startTime < phraseEnd - 0.001,
+    );
+    if (inPhrase.length === 0) continue;
+
+    const cadenceNote = inPhrase.reduce((best, n) =>
+      n.startTime >= best.startTime ? n : best,
+    );
+    cadenceNote.pitch = cadencePitch(
+      pitches,
+      rootPc,
+      intervals,
+      cadenceNote.pitch,
+    );
+    cadenceNote.velocity = Math.min(127, cadenceNote.velocity + 4);
+  }
+
+  return [...lead, ...harmony].sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
+}
+
+/** Hard snap any remaining out-of-scale lead notes. */
+export function enforceScaleAdherence(
+  notes: MidiNote[],
+  key: string,
+  scale: Scale,
+  minMidi = 48,
+  maxMidi = 84,
+): MidiNote[] {
+  const rootPc = NOTE_TO_PC[key] ?? 0;
+  return notes.map((n) => {
+    if (n.velocity < LEAD_VELOCITY_MIN) return n;
+    if (isPitchInScale(n.pitch, key, scale)) return n;
+    return { ...n, pitch: snapToScale(n.pitch, rootPc, scale, minMidi, maxMidi) };
+  });
 }
 
 function shapeArticulation(notes: MidiNote[], articulation: ArticulationType): MidiNote[] {
@@ -246,13 +336,15 @@ export function postProcessMelody(
   });
   const progression = params.chordProgression ?? [];
   const rigidity = options.rigidity ?? resolveRigidity(params);
+  const bars = Math.max(1, toNumber(params.bars, 4));
+  const scaleMinBias = 0.25 + rigidity * 0.55;
   const hybridBias =
     mode === "hybrid"
-      ? 0.55 + rigidity * 0.4
+      ? Math.max(scaleMinBias, 0.55 + rigidity * 0.4)
       : mode === "chords"
         ? 0.88 + rigidity * 0.12
-        : rigidity * 0.35;
-  const melodyScaleLock = mode === "melody" && rigidity >= 0.75;
+        : Math.max(scaleMinBias * 0.85, rigidity * 0.35);
+  const melodyScaleLock = mode === "melody" && rigidity >= 0.65;
 
   let processed = notes.map((n) => {
     const startTime = quantizeBeat(n.startTime, GRID);
@@ -279,6 +371,7 @@ export function postProcessMelody(
   });
 
   processed = dedupeIdentical(processed);
+  processed = enforceScaleAdherence(processed, params.key, params.scale);
 
   processed = shapeArticulation(processed, articulation);
 
@@ -294,15 +387,47 @@ export function postProcessMelody(
     }
   }
 
+  if (processed.length > 1 && mode !== "chords") {
+    const scalePitches = buildScalePitches(
+      rootPc,
+      SCALE_INTERVALS[params.scale] ?? SCALE_INTERVALS.major,
+      48,
+      84,
+    );
+    processed = alignPhraseBoundaries(
+      processed,
+      scalePitches,
+      rootPc,
+      params.scale,
+      beatsPerBar,
+      bars,
+    );
+  }
+
+  if (mode !== "chords") {
+    const scalePitches = buildScalePitches(
+      rootPc,
+      SCALE_INTERVALS[params.scale] ?? SCALE_INTERVALS.major,
+      48,
+      84,
+    );
+    processed = enforcePhraseStructure(processed, scalePitches, {
+      beatsPerBar,
+      bars,
+      allowEmptyBars: params.stylePreset === "clean",
+      pitchChangeEveryBeats: rigidity >= 0.7 ? 1.5 : 2.5,
+      maxLeap: mode === "hybrid" ? 10 : 12,
+    });
+  }
+
   if (processed.length > 1 && mode === "melody") {
     const lead = processed
       .filter((n) => n.velocity >= 60)
       .sort((a, b) => a.startTime - b.startTime);
     const last = lead[lead.length - 1] ?? processed[processed.length - 1]!;
     const intervals = SCALE_INTERVALS[params.scale] ?? SCALE_INTERVALS.major;
-    const tonicPc = (rootPc + intervals[0]!) % 12;
-    const octave = Math.round(last.pitch / 12);
-    last.pitch = octave * 12 + tonicPc;
+    const scalePitches = buildScalePitches(rootPc, intervals, 48, 84);
+    last.pitch = cadencePitch(scalePitches, rootPc, intervals, last.pitch);
     if (last.pitch < 55) last.pitch += 12;
   }
 
@@ -320,6 +445,7 @@ export function postProcessMelody(
       scalePitches,
       2.0,
     );
+    processed = enforceScaleAdherence(processed, params.key, params.scale);
   }
 
   return processed;

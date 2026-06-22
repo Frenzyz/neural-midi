@@ -45,7 +45,7 @@ GIANTMIDI_ZIP_URL = (
     "midi_transcription_policies_only968nbf0_89.zip"
 )
 NOTTINGHAM_ZIP_URL = (
-    "https://github.com/danbrown/nottingham-dataset/raw/master/nottingham.zip"
+    "https://github.com/jukedeck/nottingham-dataset/archive/refs/heads/master.zip"
 )
 EGMD_MANIFEST_URL = (
     "https://storage.googleapis.com/magentadata/datasets/egdb/egdb_midi.zip"
@@ -170,7 +170,7 @@ def fetch_giantmidi(raw_dir: Path, midi_dir: Path, max_files: int) -> int:
 
 
 def fetch_nottingham(raw_dir: Path, midi_dir: Path, max_files: int) -> int:
-    zip_path = raw_dir / "nottingham.zip"
+    zip_path = raw_dir / "nottingham-master.zip"
     try:
         download(NOTTINGHAM_ZIP_URL, zip_path)
     except Exception as err:
@@ -180,7 +180,13 @@ def fetch_nottingham(raw_dir: Path, midi_dir: Path, max_files: int) -> int:
     if not extract_dir.exists():
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(extract_dir)
-    return copy_tree_midi(extract_dir, midi_dir, max_files, "nottingham")
+    root = extract_dir / "nottingham-dataset-master"
+    if not root.exists():
+        root = next(extract_dir.glob("nottingham*"), extract_dir)
+    midi_sub = root / "MIDI"
+    if midi_sub.exists():
+        root = midi_sub
+    return copy_tree_midi(root, midi_dir, max_files, "nottingham")
 
 
 def fetch_egmd(raw_dir: Path, midi_dir: Path, max_files: int) -> int:

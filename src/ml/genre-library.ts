@@ -16,6 +16,99 @@ export interface GenreLibraryEntry {
   velocityAccent: number;
 }
 
+/** Inference-time priors when genre training data is thin — biases sampling without retraining. */
+export interface GenreInferencePriors {
+  temperatureMult: number;
+  nucleusTopP: number;
+  restResampleMult: number;
+  repeatPitchPenaltyMult: number;
+  /** 0–1 ONNX logit penalty strength for out-of-scale pitch classes. */
+  scaleLockStrength: number;
+  durationChoices: number[];
+  durationWeights: number[];
+}
+
+const DEFAULT_DURATION_CHOICES = [0.5, 0.75, 1.0, 1.25, 1.5];
+const DEFAULT_DURATION_WEIGHTS = [0.15, 0.22, 0.28, 0.2, 0.15];
+
+function priors(
+  overrides: Partial<GenreInferencePriors> & Pick<GenreInferencePriors, "temperatureMult" | "nucleusTopP">,
+): GenreInferencePriors {
+  return {
+    restResampleMult: 1,
+    repeatPitchPenaltyMult: 1,
+    scaleLockStrength: 0.55,
+    durationChoices: DEFAULT_DURATION_CHOICES,
+    durationWeights: DEFAULT_DURATION_WEIGHTS,
+    ...overrides,
+  };
+}
+
+export const GENRE_INFERENCE_PRIORS: Record<Genre, GenreInferencePriors> = {
+  pop: priors({ temperatureMult: 0.95, nucleusTopP: 0.9, scaleLockStrength: 0.65 }),
+  trap: priors({
+    temperatureMult: 0.82,
+    nucleusTopP: 0.82,
+    restResampleMult: 0.75,
+    repeatPitchPenaltyMult: 1.35,
+    scaleLockStrength: 0.72,
+    durationChoices: [0.25, 0.35, 0.5, 0.75],
+    durationWeights: [0.28, 0.22, 0.32, 0.18],
+  }),
+  house: priors({
+    temperatureMult: 0.88,
+    nucleusTopP: 0.85,
+    scaleLockStrength: 0.68,
+    durationChoices: [0.25, 0.5, 0.75, 1.0],
+    durationWeights: [0.35, 0.3, 0.2, 0.15],
+  }),
+  lofi: priors({
+    temperatureMult: 0.78,
+    nucleusTopP: 0.88,
+    restResampleMult: 1.2,
+    scaleLockStrength: 0.78,
+    durationChoices: [0.75, 1.0, 1.25, 1.5, 2.0],
+    durationWeights: [0.2, 0.28, 0.28, 0.16, 0.08],
+  }),
+  edm: priors({
+    temperatureMult: 1.05,
+    nucleusTopP: 0.88,
+    repeatPitchPenaltyMult: 0.85,
+    scaleLockStrength: 0.6,
+    durationChoices: [0.25, 0.5, 0.75, 1.0],
+    durationWeights: [0.3, 0.35, 0.25, 0.1],
+  }),
+  rnb: priors({
+    temperatureMult: 0.85,
+    nucleusTopP: 0.9,
+    restResampleMult: 1.1,
+    scaleLockStrength: 0.7,
+    durationChoices: [0.5, 0.75, 1.0, 1.25, 1.5],
+    durationWeights: [0.12, 0.22, 0.32, 0.22, 0.12],
+  }),
+  drill: priors({
+    temperatureMult: 0.8,
+    nucleusTopP: 0.8,
+    restResampleMult: 0.7,
+    repeatPitchPenaltyMult: 1.25,
+    scaleLockStrength: 0.74,
+    durationChoices: [0.25, 0.35, 0.5, 0.75],
+    durationWeights: [0.32, 0.24, 0.28, 0.16],
+  }),
+  ambient: priors({
+    temperatureMult: 0.72,
+    nucleusTopP: 0.92,
+    restResampleMult: 1.35,
+    scaleLockStrength: 0.82,
+    durationChoices: [1.0, 1.25, 1.5, 2.0, 2.5],
+    durationWeights: [0.18, 0.22, 0.28, 0.22, 0.1],
+  }),
+};
+
+export function genreInferencePriors(genre: Genre): GenreInferencePriors {
+  return GENRE_INFERENCE_PRIORS[genre] ?? GENRE_INFERENCE_PRIORS.pop;
+}
+
 /** Genre-labeled fragment library inspired by MIDI Wizard's approach. */
 export const GENRE_LIBRARY: Record<Genre, GenreLibraryEntry> = {
   pop: {
@@ -184,6 +277,19 @@ export const GENRE_LIBRARY: Record<Genre, GenreLibraryEntry> = {
 
 export function genreEntry(genre: Genre): GenreLibraryEntry {
   return GENRE_LIBRARY[genre] ?? GENRE_LIBRARY.pop;
+}
+
+export function pickWeightedDuration(
+  choices: number[],
+  weights: number[],
+  rng: () => number,
+): number {
+  let roll = rng();
+  for (let i = 0; i < choices.length; i++) {
+    roll -= weights[i] ?? 0;
+    if (roll <= 0) return choices[i]!;
+  }
+  return choices[choices.length - 1] ?? 1.0;
 }
 
 export function pickMotifFragments(genre: Genre, rng: () => number): [MotifFragment, MotifFragment] {

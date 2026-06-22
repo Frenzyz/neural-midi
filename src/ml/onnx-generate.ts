@@ -1,6 +1,7 @@
 import { float32Vector } from "./onnx-tensors.js";
 import { chordAtBeat } from "./chords.js";
 import { resolveExpression } from "./expression.js";
+import { pickWeightedDuration } from "./genre-library.js";
 import {
   DEFAULT_GRID_DIVISION,
   gridStepBeats,
@@ -9,7 +10,7 @@ import {
   snapToGrid,
 } from "./grid-quantize.js";
 import { addHarmonyLayer, mergeVoices } from "./pattern-engine.js";
-import { mulberry32 } from "./melody-engine.js";
+import { mulberry32, pitchClassesInScale } from "./melody-engine.js";
 import { runMelodyStep, getHiddenStateSize, getOnnxModelVersion, isOnnxReady } from "./onnx-runtime.js";
 import {
   chordQualityOneHot,
@@ -19,7 +20,7 @@ import {
   REST_TOKEN,
   VOCAB_SIZE,
 } from "./tokenizer.js";
-import type { GenerationParams, GenerationResult, MidiNote } from "./types.js";
+import type { GenerationParams, GenerationResult, MidiNote, Scale } from "./types.js";
 import { resolveTimeSignature, toNumber } from "../util/coerce.js";
 
 function sampleToken(logits: Float32Array, temperature: number, rng: () => number): number {
@@ -99,6 +100,23 @@ function applyRepeatPitchPenalty(
   logits[last] = (logits[last] ?? 0) - p;
 }
 
+/** Penalize pitch-class tokens outside the selected key/scale before sampling. */
+function applyScaleLogitMask(
+  logits: Float32Array,
+  key: string,
+  scale: Scale,
+  strength: number,
+): void {
+  if (strength <= 0) return;
+  const allowed = new Set(pitchClassesInScale(key, scale));
+  const penalty = 4 + strength * 10;
+  for (let token = 0; token < 12; token++) {
+    if (!allowed.has(token)) {
+      logits[token] = (logits[token] ?? 0) - penalty;
+    }
+  }
+}
+
 function tokenToMidiPitch(token: number, octave: number): number {
   return octave * 12 + token;
 }
@@ -156,6 +174,7 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
       expr.sustainRepeatPenalty,
       consecutiveSamePitchSteps,
     );
+    applyScaleLogitMask(logitsForSample, params.key, params.scale, expr.scaleLockStrength);
 
     const token = sampleTokenNucleus(logitsForSample, temperature, expr.nucleusTopP, rng);
     prevToken = token;
@@ -169,6 +188,7 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
         expr.sustainRepeatPenalty,
         consecutiveSamePitchSteps,
       );
+      applyScaleLogitMask(logitsForSample, params.key, params.scale, expr.scaleLockStrength);
       pitchToken = sampleTokenNucleus(
         logitsForSample,
         Math.max(0.2, temperature * 0.9),
@@ -195,17 +215,9 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
     recentPitchTokens.push(pitchToken);
     if (recentPitchTokens.length > 4) recentPitchTokens.shift();
 
-    const durationChoices = [0.5, 0.75, 1.0, 1.25, 1.5];
-    const durationWeights = [0.15, 0.22, 0.28, 0.2, 0.15];
-    let durRoll = rng();
-    let noteDuration = 1.0;
-    for (let di = 0; di < durationChoices.length; di++) {
-      durRoll -= durationWeights[di]!;
-      if (durRoll <= 0) {
-        noteDuration = durationChoices[di]!;
-        break;
-      }
-    }
+    const durationChoices = expr.durationChoices;
+    const durationWeights = expr.durationWeights;
+    let noteDuration = pickWeightedDuration(durationChoices, durationWeights, rng);
     noteDuration = Math.min(noteDuration, expr.maxMelodyNoteDuration);
     if (consecutiveSamePitchSteps > 4) {
       noteDuration = Math.min(noteDuration, 0.75);
