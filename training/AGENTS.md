@@ -6,6 +6,9 @@ Offline Python pipeline: download MAESTRO, train chord-conditioned GRU, export `
 
 - `download_data.py` — Fetches MAESTRO v3.0.0, extracts subset → `training/data/midi/`, writes `manifest.csv`
 - `train_melody.py` — Monophonic reduction, per-bar chord labels, GRU training, ONNX export
+- `reward.py` — Scalar melody reward (rest, diversity, entropy, interval, syncopation, anti-repeat)
+- `train_reward.py` — RWR + REINFORCE fine-tune from a `.pt` checkpoint → new ONNX (e.g. v6→v7)
+- `eval_generation.py` — Compare generated vs dataset metrics per genre
 - `requirements.txt` — torch, pretty_midi, numpy, requests, tqdm, onnx
 - `data/` — Gitignored training data (`midi/`, `maestro_raw/`, `manifest.csv`)
 
@@ -13,7 +16,8 @@ Offline Python pipeline: download MAESTRO, train chord-conditioned GRU, export `
 
 ```
 download_data.py → training/data/midi/
-train_melody.py  → models/melody-v1.onnx
+train_melody.py  → models/melody-v6.onnx
+train_reward.py  → models/melody-v7.onnx  (fine-tune from v6.pt)
 npm run build    → dist/models/melody-v1.onnx
 ```
 

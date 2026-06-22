@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { createFloat32Tensor, createInt64ScalarTensor, float32Vector } from "./onnx-tensors.js";
 
 export const MODEL_FILENAMES = [
+  "melody-v7.onnx",
   "melody-v6.onnx",
   "melody-v5.onnx",
   "melody-v4.onnx",
@@ -25,12 +26,17 @@ let modelPath: string | null = null;
 let loadPromise: Promise<boolean> | null = null;
 
 function hasGenreConditioningModel(resolved: string): boolean {
-  return resolved.includes("melody-v6") || resolved.includes("melody-v5");
+  return (
+    resolved.includes("melody-v7") ||
+    resolved.includes("melody-v6") ||
+    resolved.includes("melody-v5")
+  );
 }
 
 function configureForModel(resolved: string): void {
   genreConditioning = hasGenreConditioningModel(resolved);
   if (
+    resolved.includes("melody-v7") ||
     resolved.includes("melody-v6") ||
     resolved.includes("melody-v5") ||
     resolved.includes("melody-v4") ||
@@ -56,6 +62,7 @@ export function getHiddenTensorDims(): [number, number, number] {
 }
 
 export function getOnnxModelVersion(): string {
+  if (resolvedIncludesV7()) return "onnx-v7.0";
   if (resolvedIncludesV6()) return "onnx-v6.0";
   if (resolvedIncludesV5()) return "onnx-v5.0";
   if (resolvedIncludesV4()) return "onnx-v4.0";
@@ -65,6 +72,10 @@ export function getOnnxModelVersion(): string {
 
 export function hasGenreConditioning(): boolean {
   return genreConditioning;
+}
+
+function resolvedIncludesV7(): boolean {
+  return modelPath?.includes("melody-v7") ?? false;
 }
 
 function resolvedIncludesV6(): boolean {
@@ -192,7 +203,7 @@ export async function runMelodyStep(
 
   if (genreConditioning) {
     if (!genre) {
-      throw new Error("Genre one-hot required for melody-v5/v6 model");
+      throw new Error("Genre one-hot required for melody-v5/v6/v7 model");
     }
     feeds.genre = createFloat32Tensor(ortModule.Tensor, genre, [1, genre.length]);
   }
