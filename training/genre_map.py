@@ -24,7 +24,9 @@ SOURCE_TO_GENRE: dict[str, str] = {
     "jsb": "ambient",
     "giantmidi": "ambient",
     "nottingham": "lofi",
-    "egmd": "rnb",
+    "guitarset": "rnb",
+    "egmd": "rnb",  # legacy alias → guitarset
+    "rnb": "rnb",
     "trap": "trap",
     "house": "house",
     "edm": "edm",

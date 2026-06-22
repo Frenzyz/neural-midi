@@ -6,7 +6,7 @@ import * as path from "node:path";
 const manifest = JSON.parse(fs.readFileSync("manifest.json", "utf8"));
 const production = process.argv.includes("--production");
 
-for (const name of ["melody-v7.onnx", "melody-v6.onnx", "melody-v5.onnx", "melody-v4.onnx", "melody-v3.onnx", "melody-v2.onnx", "melody-v1.onnx"]) {
+for (const name of ["melody-v8.onnx", "melody-v7.onnx", "melody-v6.onnx", "melody-v5.onnx", "melody-v4.onnx", "melody-v3.onnx", "melody-v2.onnx", "melody-v1.onnx"]) {
   const modelSrc = path.join("models", name);
   const modelDest = path.join("dist", "models", name);
   if (fs.existsSync(modelSrc)) {

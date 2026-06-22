@@ -6,3 +6,5 @@ tqdm>=4.66.0
 onnx>=1.15.0
 onnxruntime>=1.16.0
 huggingface_hub>=0.20.0
+gdown>=5.0.0
+jams>=0.3.4
