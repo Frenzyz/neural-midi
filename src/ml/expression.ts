@@ -2,35 +2,47 @@ import type { GenerationParams, StylePreset } from "./types.js";
 import { toNumber } from "../util/coerce.js";
 
 export interface ExpressionKnobs {
-  /** ONNX: chance to resample away from REST token (lower = more rests). */
   restResampleProb: number;
-  /** ONNX logit penalty when same pitch would repeat 3+ times. */
   repeatPitchPenalty: number;
-  /** Extra logit penalty when same pitch spans >1 beat in sampling. */
   sustainRepeatPenalty: number;
-  /** Max melody note duration (beats) before post-process split. */
   maxMelodyNoteDuration: number;
-  /** addHarmonyLayer / addHarmonicStacks density 0–1. */
   harmonyDensity: number;
-  /** Dense style: add chord accompaniment even in melody mode. */
   hybridAccompaniment: boolean;
-  /** Post-process ghost-note chance (0 = off). */
   ghostNoteChance: number;
-  /** Sampling temperature blend for ONNX. */
   sampleTemperature: number;
-  /** Max simultaneous notes per 16th grid slot after overlap resolve. */
   maxPolyphonyPerSlot: number;
-  /** Max distinct 16th slots filled per bar (style cap). */
   maxSixteenthsPerBar: number;
+  /** 0–1 timing/scale strictness for grid + chord snap. */
+  rigidity: number;
+  /** Nucleus top-p for ONNX sampling (lower = more focused). */
+  nucleusTopP: number;
 }
 
 const DEFAULT_EXPRESSION = 0.5;
 const DEFAULT_STYLE: StylePreset = "expressive";
 
+export function resolveRigidity(params: GenerationParams): number {
+  if (params.rigidity !== undefined) {
+    return Math.max(0, Math.min(1, toNumber(params.rigidity, 0.5)));
+  }
+  const style = params.stylePreset ?? DEFAULT_STYLE;
+  const expression = Math.max(0, Math.min(1, toNumber(params.expression, DEFAULT_EXPRESSION)));
+  switch (style) {
+    case "clean":
+      return 0.85 + (1 - expression) * 0.15;
+    case "dense":
+      return 0.45 + expression * 0.15;
+    case "expressive":
+    default:
+      return 0.55 + expression * 0.25;
+  }
+}
+
 export function resolveExpression(params: GenerationParams): ExpressionKnobs {
   const expression = Math.max(0, Math.min(1, toNumber(params.expression, DEFAULT_EXPRESSION)));
   const style = params.stylePreset ?? DEFAULT_STYLE;
   const temperature = Math.max(0.1, toNumber(params.temperature, 0.7));
+  const rigidity = resolveRigidity(params);
 
   let restResampleProb = 0.08 + expression * 0.22;
   let repeatPitchPenalty = 2.0 + expression * 2.0;
@@ -41,13 +53,14 @@ export function resolveExpression(params: GenerationParams): ExpressionKnobs {
   let ghostNoteChance = 0;
   let maxPolyphonyPerSlot = 2;
   let maxSixteenthsPerBar = 12;
+  let nucleusTopP = 0.92 - rigidity * 0.12 + expression * 0.08;
 
   switch (style) {
     case "clean":
       restResampleProb = 0.28 + (1 - expression) * 0.22;
       repeatPitchPenalty = 2.5 + expression;
       harmonyDensity = 0.15 + expression * 0.15;
-      maxPolyphonyPerSlot = 2;
+      maxPolyphonyPerSlot = 1;
       maxSixteenthsPerBar = 8;
       break;
     case "dense":
@@ -60,9 +73,13 @@ export function resolveExpression(params: GenerationParams): ExpressionKnobs {
       break;
     case "expressive":
     default:
-      maxPolyphonyPerSlot = 2;
+      maxPolyphonyPerSlot = 1;
       maxSixteenthsPerBar = 12;
       break;
+  }
+
+  if (rigidity >= 0.75) {
+    maxPolyphonyPerSlot = Math.min(maxPolyphonyPerSlot, style === "dense" ? 3 : 1);
   }
 
   return {
@@ -73,8 +90,10 @@ export function resolveExpression(params: GenerationParams): ExpressionKnobs {
     harmonyDensity,
     hybridAccompaniment,
     ghostNoteChance,
-    sampleTemperature: temperature * (0.85 + expression * 0.3),
+    sampleTemperature: temperature * (0.85 + expression * 0.45),
     maxPolyphonyPerSlot,
     maxSixteenthsPerBar,
+    rigidity,
+    nucleusTopP: Math.max(0.75, Math.min(0.98, nucleusTopP)),
   };
 }

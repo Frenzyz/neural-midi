@@ -65,6 +65,10 @@ export interface GenerationParams {
   stylePreset?: StylePreset;
   /** Opt-in light post-filter; off by default. */
   tightenPhrasing?: boolean;
+  /** Timing/rule strictness 0–1 (grid snap, scale lock). Default from style. */
+  rigidity?: number;
+  /** History index for variety rotation (set by inference). */
+  generationIndex?: number;
 }
 
 export interface GenerationResult {

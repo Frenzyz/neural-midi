@@ -41,6 +41,44 @@ function sampleToken(logits: Float32Array, temperature: number, rng: () => numbe
   return REST_TOKEN;
 }
 
+/** Nucleus (top-p) sampling for more varied but coherent tokens. */
+function sampleTokenNucleus(
+  logits: Float32Array,
+  temperature: number,
+  topP: number,
+  rng: () => number,
+): number {
+  const scaled = new Float32Array(VOCAB_SIZE);
+  let max = -Infinity;
+  for (let i = 0; i < VOCAB_SIZE; i++) {
+    scaled[i] = logits[i]! / Math.max(0.1, temperature);
+    if (scaled[i]! > max) max = scaled[i]!;
+  }
+  const probs: { idx: number; p: number }[] = [];
+  let sum = 0;
+  for (let i = 0; i < VOCAB_SIZE; i++) {
+    const p = Math.exp(scaled[i]! - max);
+    probs.push({ idx: i, p });
+    sum += p;
+  }
+  for (const entry of probs) entry.p /= sum;
+  probs.sort((a, b) => b.p - a.p);
+  let cumulative = 0;
+  const cutoff: { idx: number; p: number }[] = [];
+  for (const entry of probs) {
+    cumulative += entry.p;
+    cutoff.push(entry);
+    if (cumulative >= topP) break;
+  }
+  const total = cutoff.reduce((s, e) => s + e.p, 0);
+  let r = rng() * total;
+  for (const entry of cutoff) {
+    r -= entry.p;
+    if (r <= 0) return entry.idx;
+  }
+  return cutoff[cutoff.length - 1]?.idx ?? REST_TOKEN;
+}
+
 /** Down-weight same pitch token when repeat streak would extend. */
 function applyRepeatPitchPenalty(
   logits: Float32Array,
@@ -67,7 +105,9 @@ function tokenToMidiPitch(token: number, octave: number): number {
 export async function generateOnnxMelody(params: GenerationParams): Promise<GenerationResult | null> {
   if (!isOnnxReady()) return null;
 
-  const rng = mulberry32(toNumber(params.seed, 1));
+  const rng = mulberry32(
+    toNumber(params.seed, 1) + toNumber(params.generationIndex, 0) * 7919,
+  );
   const { numerator: beatsPerBar } = resolveTimeSignature({
     signatureNumerator: params.timeSignature.numerator,
     signatureDenominator: params.timeSignature.denominator,
@@ -114,7 +154,7 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
       consecutiveSamePitchSteps,
     );
 
-    const token = sampleToken(logitsForSample, temperature, rng);
+    const token = sampleTokenNucleus(logitsForSample, temperature, expr.nucleusTopP, rng);
     prevToken = token;
 
     let pitchToken = token;
@@ -126,7 +166,12 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
         expr.sustainRepeatPenalty,
         consecutiveSamePitchSteps,
       );
-      pitchToken = sampleToken(logitsForSample, Math.max(0.2, temperature * 0.9), rng);
+      pitchToken = sampleTokenNucleus(
+        logitsForSample,
+        Math.max(0.2, temperature * 0.9),
+        expr.nucleusTopP,
+        rng,
+      );
       prevToken = pitchToken;
     }
 

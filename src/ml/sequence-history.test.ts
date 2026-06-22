@@ -45,8 +45,9 @@ describe("sequence-history", () => {
     expect(currentSnapshot(h)[0]!.pitch).toBe(62);
   });
 
-  it("increments generation seed", () => {
-    expect(nextGenerationSeed(42)).toBe(43);
-    expect(nextGenerationSeed(999_999)).toBe(0);
+  it("increments generation seed with history length", () => {
+    expect(nextGenerationSeed(42, 0)).toBe(43);
+    expect(nextGenerationSeed(42, 5)).toBe(128);
+    expect(nextGenerationSeed(999_999, 0)).toBe(0);
   });
 });

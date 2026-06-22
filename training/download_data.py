@@ -2,13 +2,16 @@
 """Download multi-source MIDI datasets for melody training.
 
 Supported datasets (--datasets comma-separated):
-  maestro  — MAESTRO v3.0.0 piano (CC BY-NC-SA 4.0)
-  pop909   — POP909 pop songs with chords (research use)
-  jsb      — Bach JSB chorales (public domain)
-  lmd      — Lakh MIDI matched subset via HuggingFace (melody-focused slice)
+  maestro      — MAESTRO v3.0.0 piano (CC BY-NC-SA 4.0)
+  pop909       — POP909 pop songs with chords (research use)
+  jsb          — Bach JSB chorales (public domain)
+  lmd          — HuggingFace LMD melody subset (optional)
+  giantmidi    — GiantMIDI-Piano repertoire subset (Google Magenta)
+  nottingham   — Nottingham folk melody MIDI (folk leads)
+  egmd         — E-GMD expressive guitar subset (melody lines)
 
 Example:
-  python training/download_data.py --datasets maestro,pop909,jsb,lmd --max-per-dataset 2000
+  python training/download_data.py --datasets maestro,pop909,jsb,giantmidi,nottingham --max-per-dataset 2000
 """
 
 from __future__ import annotations
@@ -35,6 +38,16 @@ JSB_ZIP_URL = (
 )
 # HuggingFace LMD melody subset (≈2k files, research)
 LMD_HF_DATASET = "mkorzeniowski/lmd_matched_melody"
+GIANTMIDI_ZIP_URL = (
+    "https://storage.googleapis.com/magentadata/datasets/giantmidi-piano/"
+    "midi_transcription_policies_only968nbf0_89.zip"
+)
+NOTTINGHAM_ZIP_URL = (
+    "https://github.com/danbrown/nottingham-dataset/raw/master/nottingham.zip"
+)
+EGMD_MANIFEST_URL = (
+    "https://storage.googleapis.com/magentadata/datasets/egdb/egdb_midi.zip"
+)
 
 
 def download(url: str, dest: Path) -> None:
@@ -140,6 +153,48 @@ def fetch_lmd_hf(midi_dir: Path, max_files: int) -> int:
     return count
 
 
+def fetch_giantmidi(raw_dir: Path, midi_dir: Path, max_files: int) -> int:
+    zip_path = raw_dir / "giantmidi-piano.zip"
+    try:
+        download(GIANTMIDI_ZIP_URL, zip_path)
+    except Exception as err:
+        print(f"  giantmidi: download failed ({err}) — skipped")
+        return 0
+    extract_dir = raw_dir / "giantmidi"
+    if not extract_dir.exists():
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(extract_dir)
+    return copy_tree_midi(extract_dir, midi_dir, max_files, "giantmidi")
+
+
+def fetch_nottingham(raw_dir: Path, midi_dir: Path, max_files: int) -> int:
+    zip_path = raw_dir / "nottingham.zip"
+    try:
+        download(NOTTINGHAM_ZIP_URL, zip_path)
+    except Exception as err:
+        print(f"  nottingham: download failed ({err}) — skipped")
+        return 0
+    extract_dir = raw_dir / "nottingham"
+    if not extract_dir.exists():
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(extract_dir)
+    return copy_tree_midi(extract_dir, midi_dir, max_files, "nottingham")
+
+
+def fetch_egmd(raw_dir: Path, midi_dir: Path, max_files: int) -> int:
+    zip_path = raw_dir / "egmd.zip"
+    try:
+        download(EGMD_MANIFEST_URL, zip_path)
+    except Exception as err:
+        print(f"  egmd: download failed ({err}) — skipped")
+        return 0
+    extract_dir = raw_dir / "egmd"
+    if not extract_dir.exists():
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(extract_dir)
+    return copy_tree_midi(extract_dir, midi_dir, max_files, "egmd")
+
+
 def write_manifest(midi_dir: Path, data_dir: Path) -> None:
     manifest = data_dir / "manifest.csv"
     with open(manifest, "w", newline="") as f:
@@ -158,7 +213,7 @@ def main() -> None:
         "--datasets",
         type=str,
         default="maestro,pop909,jsb",
-        help="Comma-separated: maestro,pop909,jsb,lmd",
+        help="Comma-separated: maestro,pop909,jsb,lmd,giantmidi,nottingham,egmd",
     )
     parser.add_argument("--max-per-dataset", type=int, default=2000)
     args = parser.parse_args()
@@ -190,6 +245,21 @@ def main() -> None:
             totals["lmd"] = fetch_lmd_hf(midi_dir, args.max_per_dataset)
         except Exception as err:
             print(f"  lmd: failed ({err})")
+    if "giantmidi" in datasets:
+        try:
+            totals["giantmidi"] = fetch_giantmidi(raw_dir, midi_dir, args.max_per_dataset)
+        except Exception as err:
+            print(f"  giantmidi: failed ({err})")
+    if "nottingham" in datasets:
+        try:
+            totals["nottingham"] = fetch_nottingham(raw_dir, midi_dir, min(args.max_per_dataset, 800))
+        except Exception as err:
+            print(f"  nottingham: failed ({err})")
+    if "egmd" in datasets:
+        try:
+            totals["egmd"] = fetch_egmd(raw_dir, midi_dir, min(args.max_per_dataset, 1200))
+        except Exception as err:
+            print(f"  egmd: failed ({err})")
 
     write_manifest(midi_dir, args.data_dir)
     print("Downloaded:", totals)

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Train chord-conditioned melody step model and export ONNX (v3 polyphonic).
+"""Train chord-conditioned melody step model and export ONNX (v4 fine-tune).
 
 Pipeline:
-  python training/download_data.py --datasets maestro,pop909,jsb --max-per-dataset 2000
-  python training/train_melody.py --epochs 16 --max-files 8000 --out models/melody-v3.onnx
+  python training/download_data.py --datasets maestro,pop909,jsb,giantmidi --max-per-dataset 2000
+  python training/train_melody.py --epochs 20 --max-files 10000 --out models/melody-v4.onnx
+  python training/train_melody.py --checkpoint models/melody-v3.pt --epochs 12 --out models/melody-v4.onnx
 """
 
 from __future__ import annotations
@@ -198,11 +199,13 @@ def export_onnx(model: MelodyStepModel, out_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=Path, default=Path("training/data/midi"))
-    parser.add_argument("--out", type=Path, default=Path("models/melody-v3.onnx"))
-    parser.add_argument("--epochs", type=int, default=16)
+    parser.add_argument("--out", type=Path, default=Path("models/melody-v4.onnx"))
+    parser.add_argument("--checkpoint", type=Path, default=None, help="Optional .pt weights to fine-tune from")
+    parser.add_argument("--save-checkpoint", type=Path, default=Path("models/melody-v4.pt"))
+    parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=512)
-    parser.add_argument("--max-files", type=int, default=8000)
-    parser.add_argument("--lr", type=float, default=8e-4)
+    parser.add_argument("--max-files", type=int, default=10000)
+    parser.add_argument("--lr", type=float, default=6e-4)
     args = parser.parse_args()
 
     midi_paths = sorted(args.data_dir.glob("*.mid*"))
@@ -216,6 +219,10 @@ def main() -> None:
 
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
     model = MelodyStepModel()
+    if args.checkpoint and args.checkpoint.exists():
+        state = torch.load(args.checkpoint, map_location="cpu")
+        model.load_state_dict(state)
+        print(f"Loaded checkpoint {args.checkpoint}")
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     loss_fn = nn.CrossEntropyLoss()
 
@@ -238,6 +245,10 @@ def main() -> None:
         )
 
     export_onnx(model, args.out)
+    if args.save_checkpoint:
+        args.save_checkpoint.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(model.state_dict(), args.save_checkpoint)
+        print(f"Saved checkpoint → {args.save_checkpoint}")
 
 
 if __name__ == "__main__":

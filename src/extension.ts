@@ -86,6 +86,7 @@ function buildGenerationParams(
   regionStart: number,
   regionEnd: number,
   fullGenerate: boolean,
+  generationIndex: number,
 ): GenerationParams {
   const beatsPerBar = timeSignature.numerator || 4;
   const useRegion = !fullGenerate && dialog.useRegionSettings;
@@ -105,6 +106,7 @@ function buildGenerationParams(
     chordProgression,
     generationMode: dialog.generationMode,
     articulation: dialog.articulation,
+    generationIndex,
   };
 }
 
@@ -117,6 +119,7 @@ async function runSequenceEditor(
     regionEnd: number,
     fullGenerate: boolean,
     seed: number,
+    generationIndex: number,
   ) => Promise<MidiNote[]>,
 ): Promise<MidiNote[] | null> {
   let state = initial;
@@ -175,7 +178,7 @@ async function runSequenceEditor(
         regionEnd = sel.end;
       }
 
-      const newSeed = nextGenerationSeed(state.seed);
+      const newSeed = nextGenerationSeed(state.seed, history.snapshots.length);
       const editedSnapshot = fromMidiNotes(dialog.notes);
       history = {
         ...history,
@@ -183,7 +186,14 @@ async function runSequenceEditor(
           i === history.index ? editedSnapshot : s,
         ),
       };
-      const generated = await generate(dialog, regionStart, regionEnd, fullGenerate, newSeed);
+      const generated = await generate(
+        dialog,
+        regionStart,
+        regionEnd,
+        fullGenerate,
+        newSeed,
+        history.snapshots.length,
+      );
       const merged = fullGenerate
         ? generated
         : mergeRegionNotes(currentSnapshot(history), regionStart, regionEnd, generated);
@@ -266,7 +276,7 @@ export function activate(activation: ActivationContext): void {
       const notes = await runSequenceEditor(
         (url) => ext.ui.showModalDialog(url, 920, 640),
         initialState,
-        async (dialog, regionStart, regionEnd, fullGenerate, seed) => {
+        async (dialog, regionStart, regionEnd, fullGenerate, seed, generationIndex) => {
           const bars = fullGenerate
             ? dialog.bars
             : Math.ceil((regionEnd - regionStart) / beatsPerBar) || 1;
@@ -286,6 +296,7 @@ export function activate(activation: ActivationContext): void {
               regionStart,
               regionEnd,
               fullGenerate,
+              generationIndex,
             ),
             seed,
           };

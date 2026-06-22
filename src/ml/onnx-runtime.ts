@@ -3,7 +3,12 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import { createFloat32Tensor, createInt64ScalarTensor, float32Vector } from "./onnx-tensors.js";
 
-export const MODEL_FILENAMES = ["melody-v3.onnx", "melody-v2.onnx", "melody-v1.onnx"] as const;
+export const MODEL_FILENAMES = [
+  "melody-v4.onnx",
+  "melody-v3.onnx",
+  "melody-v2.onnx",
+  "melody-v1.onnx",
+] as const;
 
 let hiddenSize = 128;
 let gruLayers = 1;
@@ -17,7 +22,7 @@ let modelPath: string | null = null;
 let loadPromise: Promise<boolean> | null = null;
 
 function configureForModel(resolved: string): void {
-  if (resolved.includes("melody-v3")) {
+  if (resolved.includes("melody-v4") || resolved.includes("melody-v3")) {
     hiddenSize = 320;
     gruLayers = 2;
   } else if (resolved.includes("melody-v2")) {
@@ -38,8 +43,13 @@ export function getHiddenTensorDims(): [number, number, number] {
 }
 
 export function getOnnxModelVersion(): string {
+  if (resolvedIncludesV4()) return "onnx-v4.0";
   if (hiddenSize >= 320) return "onnx-v3.0";
   return gruLayers > 1 ? "onnx-v2.0" : "onnx-v1.0";
+}
+
+function resolvedIncludesV4(): boolean {
+  return modelPath?.includes("melody-v4") ?? false;
 }
 
 /** @deprecated use getHiddenStateSize */

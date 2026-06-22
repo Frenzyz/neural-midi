@@ -12,7 +12,7 @@ import {
   quantizeBeat,
 } from "./melody-engine.js";
 import { resolveTimeSignature, toNumber } from "../util/coerce.js";
-import { resolveExpression } from "./expression.js";
+import { resolveExpression, resolveRigidity } from "./expression.js";
 
 export type GenerationMode = "chords" | "hybrid" | "melody";
 export type ArticulationType = "lead" | "pluck";
@@ -226,8 +226,8 @@ export function maxContinuousSamePitchBeats(
 export interface PostProcessOptions {
   mode?: GenerationMode;
   articulation?: ArticulationType;
-  /** 0 = no ghost notes (default expressive path). */
   ghostNoteChance?: number;
+  rigidity?: number;
 }
 
 export function postProcessMelody(
@@ -245,19 +245,30 @@ export function postProcessMelody(
     signatureDenominator: params.timeSignature.denominator,
   });
   const progression = params.chordProgression ?? [];
-  const hybridBias = mode === "hybrid" ? 0.72 : mode === "chords" ? 0.88 : 0.15;
+  const rigidity = options.rigidity ?? resolveRigidity(params);
+  const hybridBias =
+    mode === "hybrid"
+      ? 0.55 + rigidity * 0.4
+      : mode === "chords"
+        ? 0.88 + rigidity * 0.12
+        : rigidity * 0.35;
+  const melodyScaleLock = mode === "melody" && rigidity >= 0.75;
 
   let processed = notes.map((n) => {
     const startTime = quantizeBeat(n.startTime, GRID);
     const chord = chordAtBeat(progression, startTime);
     const onStrongBeat = Math.abs(startTime % beatsPerBar) < 0.01;
-    const bias = onStrongBeat ? hybridBias : hybridBias * 0.65;
+    const bias = melodyScaleLock
+      ? 0
+      : onStrongBeat
+        ? hybridBias
+        : hybridBias * 0.65;
     const pitch = snapToChordOrScale(
       Math.round(n.pitch),
       chord,
       rootPc,
       params.scale,
-      mode === "chords" ? 0 : bias,
+      mode === "chords" ? 0 : melodyScaleLock ? 0 : bias,
     );
     return {
       pitch,

@@ -123,6 +123,93 @@ export function transposeMotifDegrees(motif: MotifEvent[], semitoneSteps: number
   return motif.map((e) => ({ ...e, degree: e.degree + semitoneSteps }));
 }
 
+/** Circularly rotate degree assignments across motif events. */
+export function rotateMotifDegrees(motif: MotifEvent[], steps: number): MotifEvent[] {
+  if (motif.length === 0) return motif;
+  const degrees = motif.map((e) => e.degree);
+  const s = ((steps % degrees.length) + degrees.length) % degrees.length;
+  const rotated = [...degrees.slice(s), ...degrees.slice(0, s)];
+  return motif.map((e, i) => ({ ...e, degree: rotated[i]! }));
+}
+
+/** Mirror rhythmic offsets within the motif span. */
+export function invertRhythmMotif(motif: MotifEvent[]): MotifEvent[] {
+  if (motif.length < 2) return motif;
+  const maxOff = Math.max(...motif.map((e) => e.offset));
+  return [...motif]
+    .map((e) => ({ ...e, offset: maxOff - e.offset }))
+    .sort((a, b) => a.offset - b.offset);
+}
+
+const LEAD_VELOCITY = 55;
+const MAX_LEAP_SEMITONES = 12;
+
+/** Clamp inter-note leaps to maxLeap semitones on lead voice. */
+export function clampLeapSize(notes: MidiNote[], maxLeap = MAX_LEAP_SEMITONES): MidiNote[] {
+  const lead = notes.filter((n) => n.velocity >= LEAD_VELOCITY);
+  const harmony = notes.filter((n) => n.velocity < LEAD_VELOCITY);
+  const sorted = [...lead].sort((a, b) => a.startTime - b.startTime);
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1]!;
+    const cur = sorted[i]!;
+    const delta = cur.pitch - prev.pitch;
+    if (Math.abs(delta) > maxLeap) {
+      cur.pitch = prev.pitch + Math.sign(delta) * maxLeap;
+    }
+  }
+  return [...sorted, ...harmony].sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
+}
+
+export interface PhraseStructureOptions {
+  beatsPerBar: number;
+  bars: number;
+  allowEmptyBars: boolean;
+  pitchChangeEveryBeats: number;
+  maxLeap?: number;
+}
+
+/** Fill sparse bars and enforce pitch motion on lead. */
+export function enforcePhraseStructure(
+  notes: MidiNote[],
+  pitches: number[],
+  options: PhraseStructureOptions,
+): MidiNote[] {
+  let result = clampLeapSize(notes, options.maxLeap ?? MAX_LEAP_SEMITONES);
+  const { beatsPerBar, bars, allowEmptyBars, pitchChangeEveryBeats } = options;
+
+  if (!allowEmptyBars) {
+    for (let bar = 0; bar < bars; bar++) {
+      const start = bar * beatsPerBar;
+      const end = start + beatsPerBar;
+      const inBar = result.filter((n) => n.velocity >= LEAD_VELOCITY && n.startTime >= start && n.startTime < end);
+      if (inBar.length === 0 && pitches.length > 0) {
+        const degree = bar % pitches.length;
+        result.push({
+          pitch: pitches[degree]!,
+          startTime: start,
+          duration: Math.min(1, beatsPerBar),
+          velocity: 78,
+        });
+      }
+    }
+    result = result.sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
+  }
+
+  const lead = result.filter((n) => n.velocity >= LEAD_VELOCITY).sort((a, b) => a.startTime - b.startTime);
+  for (let i = 1; i < lead.length; i++) {
+    const prev = lead[i - 1]!;
+    const cur = lead[i]!;
+    const span = cur.startTime - prev.startTime;
+    if (span >= pitchChangeEveryBeats - 0.01 && cur.pitch === prev.pitch && pitches.length > 1) {
+      const idx = pitches.indexOf(cur.pitch);
+      const nextIdx = idx >= 0 ? (idx + 1) % pitches.length : 1;
+      cur.pitch = pitches[nextIdx]!;
+    }
+  }
+
+  return result;
+}
+
 export function motifToNotes(
   motif: MotifEvent[],
   motifStartBeat: number,

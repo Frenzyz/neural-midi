@@ -57,6 +57,8 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
   const mode = resolveMode(params);
   const articulation = params.articulation ?? "lead";
   const expr = resolveExpression(params);
+  const generationIndex = toNumber(params.generationIndex, 0);
+  const effectiveParams = { ...params, generationIndex };
   const { numerator: beatsPerBar } = resolveTimeSignature({
     signatureNumerator: params.timeSignature.numerator,
     signatureDenominator: params.timeSignature.denominator,
@@ -91,11 +93,11 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
 
   let result: GenerationResult;
   if (isModelLoaded()) {
-    const onnx = await generateOnnxMelody(params);
+    const onnx = await generateOnnxMelody(effectiveParams);
     if (onnx && onnx.notes.length > 0) result = onnx;
-    else result = generateStubMelody(params);
+    else result = generateStubMelody(effectiveParams);
   } else {
-    result = generateStubMelody(params);
+    result = generateStubMelody(effectiveParams);
   }
 
   logNoteCount("raw-generate", result.notes);
@@ -104,6 +106,7 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
     mode: "melody",
     articulation,
     ghostNoteChance: expr.ghostNoteChance,
+    rigidity: expr.rigidity,
   });
   logNoteCount("post-process", notes);
 
@@ -148,12 +151,13 @@ function applyFinalGrid(
   beatsPerBar: number,
   bars: number,
 ): MidiNote[] {
-  const style = params.stylePreset ?? "expressive";
+  const expr = resolveExpression(params);
   const gridOpts: GridQuantizeOptions = {
     beatsPerBar,
     bars,
     mode,
-    stylePreset: style,
+    stylePreset: params.stylePreset ?? "expressive",
+    rigidity: expr.rigidity,
   };
   return applyGridPipeline(notes, gridOpts);
 }

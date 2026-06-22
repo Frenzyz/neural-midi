@@ -54,6 +54,6 @@ export function historyLabel(state: GenerationHistoryState): string {
   return `${state.index + 1} / ${state.snapshots.length}`;
 }
 
-export function nextGenerationSeed(current: number): number {
-  return (current + 1) % 1_000_000;
+export function nextGenerationSeed(current: number, historyLength = 0): number {
+  return (current + 1 + historyLength * 17) % 1_000_000;
 }

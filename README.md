@@ -4,7 +4,7 @@ An [Ableton Live Extension](https://www.ableton.com/en/live/extensions/) that ge
 
 ## Status
 
-Phrase-based melody engine (`stub-0.6.0`) with **genre fragment library**, **generation history**, chord-aware generation, humanization (swing, ghosts, velocity), and optional **ONNX inference** (`melody-v2.onnx`, falls back to `melody-v1.onnx`).
+Phrase-based melody engine (`stub-0.8.0`) with **genre fragment library**, **rigidity + variety controls**, **generation history**, chord-aware generation, humanization (swing, ghosts, velocity), and optional **ONNX inference** (`melody-v4.onnx` → v3 → v2 → v1).
 
 ## Train the ONNX model (multi-dataset)
 
@@ -15,7 +15,10 @@ The training pipeline supports several research datasets via `--datasets`:
 | **maestro** | [MAESTRO v3.0.0](https://magenta.tensorflow.org/datasets/maestro) | Piano performances (CC BY-NC-SA 4.0) |
 | **pop909** | [POP909](https://github.com/music-x-lab/POP909-Dataset) | Pop melodies + chords |
 | **jsb** | Bach chorales (GitHub) | Harmonic grounding |
-| **lmd** | HuggingFace `mkorzeniowski/lmd_matched_melody` | Lakh MIDI melody subset (optional; skipped if unavailable) |
+| **lmd** | HuggingFace `mkorzeniowski/lmd_matched_melody` | Lakh MIDI melody subset (optional) |
+| **giantmidi** | [GiantMIDI-Piano](https://magenta.tensorflow.org/datasets/giantmidi-piano) | Piano repertoire (Magenta) |
+| **nottingham** | Nottingham folk melody collection | Folk leads |
+| **egmd** | [E-GMD / EGDB](https://magenta.tensorflow.org/datasets/guitar) | Expressive guitar melody lines |
 
 ```bash
 cd /Users/aaditchetan/Projects/neural-midi
@@ -23,12 +26,15 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r training/requirements.txt
 
-# Download thousands of melody MIDIs → training/data/midi/
-python training/download_data.py --datasets maestro,pop909,jsb,lmd --max-per-dataset 2000
+# Download melody MIDIs → training/data/midi/
+python training/download_data.py --datasets maestro,pop909,jsb,giantmidi,nottingham --max-per-dataset 2000
 
-# Train larger 2-layer GRU (hidden 256) → models/melody-v2.onnx
-python training/train_melody.py --epochs 12 --max-files 5000
+# Fine-tune v4 from v3 checkpoint (optional) or train fresh
+python training/train_melody.py --epochs 20 --max-files 10000 --out models/melody-v4.onnx
+python training/train_melody.py --checkpoint models/melody-v4.pt --epochs 12 --out models/melody-v4.onnx
 ```
+
+Exports `models/melody-v4.onnx` plus `models/melody-v4.pt` for continued fine-tuning. Runtime prefers v4 when bundled in `dist/models/`.
 
 First run downloads to `training/data/` (gitignored). Rebuild after training:
 
@@ -73,7 +79,7 @@ Inspired by Unison MIDI Wizard:
 | **Hybrid mode** | Locks melody to chord tones per bar when chords are detected |
 | **Apply to clip** | Writes the edited sequence into the Live clip |
 
-Generation runs on-device (ONNX v2 when available, otherwise stub). See [docs/GENERATION-RESEARCH.md](docs/GENERATION-RESEARCH.md) for MIDI Wizard research and how we approximate fragment-based composition.
+Generation runs on-device (ONNX v4 when available, otherwise stub). Each generate click uses `seed + history.length` for variety. **Clean / Expressive / Dense** presets map to rigidity (grid snap + scale lock); optional `rigidity` param overrides. See [docs/GENERATION-RESEARCH.md](docs/GENERATION-RESEARCH.md) for MIDI Wizard research and fragment-based composition.
 
 ## ONNX runtime in Live
 
@@ -169,7 +175,7 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the full technical design.
 | `src/extension.ts` | Extension entry — commands, UI, clip I/O |
 | `src/ml/chords.ts` | Chord detection from MIDI notes |
 | `src/ml/onnx-*.ts` | ONNX Runtime loading + generation |
-| `models/` | `melody-v1.onnx` (train with `training/train_melody.py`) |
+| `models/` | `melody-v4.onnx` (train with `training/train_melody.py`; v3/v2/v1 fallback) |
 | `training/` | MAESTRO download + training scripts |
 
 ## Build & package

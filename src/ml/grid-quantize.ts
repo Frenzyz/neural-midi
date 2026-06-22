@@ -60,16 +60,38 @@ export interface GridQuantizeOptions {
   mode: GenerationMode;
   stylePreset?: StylePreset;
   gridDivision?: number;
+  /** 0–1: strict snap (reject off-grid), min 1 grid unit duration. */
+  rigidity?: number;
+}
+
+function isOnGrid(value: number, gridStep: number): boolean {
+  const steps = value / gridStep;
+  return Math.abs(steps - Math.round(steps)) < 1e-6;
 }
 
 export function quantizeNotesToGrid(notes: MidiNote[], options: GridQuantizeOptions): MidiNote[] {
   const gridStep = gridStepBeats(options.beatsPerBar, options.gridDivision);
-  return notes.map((n) => ({
-    ...n,
-    startTime: snapToGrid(n.startTime, gridStep),
-    duration: snapDurationToGrid(Math.max(gridStep * 0.5, n.duration), gridStep),
-    velocity: Math.round(n.velocity),
-  }));
+  const rigidity = options.rigidity ?? 0.5;
+  const strict = rigidity >= 0.65;
+  const maxSnapError = strict ? gridStep * 0.01 : gridStep * 0.51;
+
+  const result: MidiNote[] = [];
+  for (const n of notes) {
+    const snappedStart = snapToGrid(n.startTime, gridStep);
+    if (Math.abs(snappedStart - n.startTime) > maxSnapError) continue;
+
+    const minDur = gridStep;
+    const snappedDur = snapDurationToGrid(Math.max(minDur, n.duration), gridStep, 1);
+    if (snappedDur < minDur - 1e-6) continue;
+
+    result.push({
+      ...n,
+      startTime: snappedStart,
+      duration: snappedDur,
+      velocity: Math.round(n.velocity),
+    });
+  }
+  return result;
 }
 
 /** Per grid slot: keep lead priority, cap polyphony, dedupe same pitch. */
@@ -114,7 +136,9 @@ export function resolveOverlaps(notes: MidiNote[], options: GridQuantizeOptions)
 /** Drop lowest-velocity notes in excess grid slots within each bar. */
 export function capBarGridDensity(notes: MidiNote[], options: GridQuantizeOptions): MidiNote[] {
   const gridStep = gridStepBeats(options.beatsPerBar, options.gridDivision);
-  const maxSlots = maxSixteenthsPerBar(options.stylePreset);
+  const styleMax = maxSixteenthsPerBar(options.stylePreset);
+  const rigidity = options.rigidity ?? 0.5;
+  const maxSlots = Math.max(4, Math.round(styleMax * (1.1 - rigidity * 0.35)));
   const slotsPerBar = Math.round(options.beatsPerBar / gridStep);
 
   const byBar = new Map<number, MidiNote[]>();
@@ -171,9 +195,7 @@ export function applyGridPipeline(notes: MidiNote[], options: GridQuantizeOption
 
 export function allNotesOnGrid(notes: MidiNote[], gridStep: number): boolean {
   return notes.every(
-    (n) =>
-      Math.abs(n.startTime / gridStep - Math.round(n.startTime / gridStep)) < 0.001 &&
-      Math.abs(n.duration / gridStep - Math.round(n.duration / gridStep)) < 0.001,
+    (n) => isOnGrid(n.startTime, gridStep) && isOnGrid(n.duration, gridStep) && n.duration >= gridStep - 1e-6,
   );
 }
 

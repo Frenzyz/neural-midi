@@ -1,7 +1,7 @@
 import type { GenerationParams, GenerationResult, MidiNote } from "./types.js";
 import { resolveTimeSignature, toNumber } from "../util/coerce.js";
 import { chordAtBeat } from "./chords.js";
-import { genreEntry, pickMotifFragments } from "./genre-library.js";
+import { genreEntry } from "./genre-library.js";
 import {
   GENRE_PROFILES,
   SCALE_INTERVALS,
@@ -10,15 +10,16 @@ import {
   mulberry32,
   nearestScaleIndex,
 } from "./melody-engine.js";
+import { pickVarietyFragments } from "./variety.js";
 import {
   addHarmonyLayer,
-  applyLegatoOverlap,
+  enforcePhraseStructure,
   mergeVoices,
-  motifFromFragment,
   phraseFromMotifs,
 } from "./pattern-engine.js";
+import { resolveExpression, resolveRigidity } from "./expression.js";
 
-const STUB_VERSION = "stub-0.7.0";
+const STUB_VERSION = "stub-0.8.0";
 
 function cadenceTargetIndex(pitches: number[], rootPc: number, intervals: number[]): number {
   const tonicCandidates = pitches
@@ -79,17 +80,26 @@ export function generateStubMelody(params: GenerationParams): GenerationResult {
     };
   }
 
-  const [fragA, fragB] = pickMotifFragments(params.genre, rng);
-  const motifA = motifFromFragment(fragA, beatsPerBar, rng);
-  const motifB = motifFromFragment(fragB, beatsPerBar, rng);
+  const generationIndex = toNumber(params.generationIndex, 0);
+  const { motifA, motifB } = pickVarietyFragments(params, generationIndex);
 
   let notes = phraseFromMotifs(bars, beatsPerBar, motifA, motifB, pitches, rng);
 
+  const rigidity = resolveRigidity(params);
+  notes = enforcePhraseStructure(notes, pitches, {
+    beatsPerBar,
+    bars,
+    allowEmptyBars: params.stylePreset === "clean",
+    pitchChangeEveryBeats: rigidity >= 0.7 ? 1.5 : 2.5,
+    maxLeap: 12,
+  });
+
   if (mode !== "chords" && progression.length > 0 && mode === "hybrid") {
-    notes = enrichWithHarmony(notes, progression, rng, 0.35);
+    const expr = resolveExpression(params);
+    notes = enrichWithHarmony(notes, progression, rng, expr.harmonyDensity);
   }
 
-  notes = applyLegatoOverlap(notes, params.articulation === "pluck" ? 0.05 : 0.1);
+  notes = notes.sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
 
   if (notes.length === 0) {
     const tonicIdx = nearestScaleIndex(pitches, 60 + rootPc);

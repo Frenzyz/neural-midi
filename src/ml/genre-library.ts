@@ -187,9 +187,67 @@ export function genreEntry(genre: Genre): GenreLibraryEntry {
 }
 
 export function pickMotifFragments(genre: Genre, rng: () => number): [MotifFragment, MotifFragment] {
-  const entry = genreEntry(genre);
-  const motifs = entry.motifs;
+  const motifs = expandedMotifsForGenre(genre);
   const a = motifs[Math.floor(rng() * motifs.length)] ?? motifs[0]!;
   const b = motifs[Math.floor(rng() * motifs.length)] ?? motifs[0]!;
   return [a, b];
+}
+
+const RHYTHM_TEMPLATES: { beatInMotif: number; duration: number; accent: boolean }[][] = [
+  [
+    { beatInMotif: 0, duration: 0.5, accent: true },
+    { beatInMotif: 1, duration: 0.5, accent: false },
+    { beatInMotif: 2, duration: 0.5, accent: true },
+    { beatInMotif: 3, duration: 0.5, accent: false },
+  ],
+  [
+    { beatInMotif: 0, duration: 0.75, accent: true },
+    { beatInMotif: 1.5, duration: 0.25, accent: false },
+    { beatInMotif: 2.5, duration: 0.75, accent: true },
+  ],
+  [
+    { beatInMotif: 0, duration: 0.25, accent: true },
+    { beatInMotif: 0.75, duration: 0.25, accent: false },
+    { beatInMotif: 1.5, duration: 0.5, accent: true },
+    { beatInMotif: 2.75, duration: 0.25, accent: false },
+  ],
+  [
+    { beatInMotif: 0, duration: 1.0, accent: true },
+    { beatInMotif: 2, duration: 1.0, accent: false },
+  ],
+  [
+    { beatInMotif: 0, duration: 0.5, accent: true },
+    { beatInMotif: 0.5, duration: 0.25, accent: false },
+    { beatInMotif: 1.25, duration: 0.75, accent: true },
+    { beatInMotif: 3, duration: 0.5, accent: false },
+  ],
+];
+
+function variateFragment(base: MotifFragment, variant: number): MotifFragment {
+  const rhythm = RHYTHM_TEMPLATES[variant % RHYTHM_TEMPLATES.length]!;
+  const degreeShift = variant % 3;
+  const reversed = [...base.degrees].reverse();
+  const rotated = [...base.degrees.slice(degreeShift), ...base.degrees.slice(0, degreeShift)];
+  const degrees = variant % 2 === 0 ? rotated : reversed;
+  return {
+    name: `${base.name}-v${variant}`,
+    degrees: degrees.map((d) => d + (variant % 2)),
+    slots: rhythm.map((slot, i) => ({
+      beatInMotif: slot.beatInMotif,
+      duration: slot.duration,
+      accent: i % 2 === 0 ? slot.accent : !slot.accent,
+    })),
+  };
+}
+
+/** Base motifs plus programmatic variations (10+ per genre). */
+export function expandedMotifsForGenre(genre: Genre): MotifFragment[] {
+  const entry = genreEntry(genre);
+  const expanded: MotifFragment[] = [...entry.motifs];
+  for (const base of entry.motifs) {
+    for (let v = 0; v < 10; v++) {
+      expanded.push(variateFragment(base, v));
+    }
+  }
+  return expanded;
 }
