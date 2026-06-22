@@ -314,6 +314,7 @@ function playPreview() {
 }
 
 function drawPlayhead(ctx, w, h) {
+  if (!playing && !scrubbingPlayhead) return;
   const x = (playheadBeat / totalBeats()) * w;
   ctx.save();
   ctx.strokeStyle = COLORS.playhead;

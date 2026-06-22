@@ -7,8 +7,9 @@ describe("brand-logo", () => {
       expect(NM_BRAND_SVG).toContain(marker);
     }
     expect(NM_BRAND_SVG).not.toContain("<text");
-    expect(NM_BRAND_SVG.match(/<rect/g)?.length).toBeGreaterThanOrEqual(4);
-    expect(NM_BRAND_SVG.match(/<path/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(NM_BRAND_SVG).not.toMatch(/<path\b/);
+    expect(NM_BRAND_SVG.match(/<rect/g)?.length).toBe(6);
     expect(NM_BRAND_SVG).toContain('fill="#e8e6f0"');
+    expect(NM_BRAND_SVG).toContain('transform="rotate(76');
   });
 });
