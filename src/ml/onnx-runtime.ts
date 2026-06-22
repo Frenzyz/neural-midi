@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
-import { createInt64ScalarTensor } from "./onnx-tensors.js";
+import { createFloat32Tensor, createInt64ScalarTensor, float32Vector } from "./onnx-tensors.js";
 
 export const MODEL_FILENAME = "melody-v1.onnx";
 const HIDDEN_SIZE = 128;
@@ -116,15 +116,15 @@ export async function runMelodyStep(
 
   const feeds: Record<string, import("onnxruntime-node").Tensor> = {
     prev_token: createInt64ScalarTensor(ortModule.Tensor, prevToken),
-    chord_root: new ortModule.Tensor("float32", chordRoot, [1, 12]),
-    chord_quality: new ortModule.Tensor("float32", chordQuality, [1, 6]),
+    chord_root: createFloat32Tensor(ortModule.Tensor, chordRoot, [1, 12]),
+    chord_quality: createFloat32Tensor(ortModule.Tensor, chordQuality, [1, 6]),
     position: createInt64ScalarTensor(ortModule.Tensor, position),
-    h_in: new ortModule.Tensor("float32", hidden, [1, 1, HIDDEN_SIZE]),
+    h_in: createFloat32Tensor(ortModule.Tensor, hidden, [1, 1, HIDDEN_SIZE]),
   };
 
   const out = await session.run(feeds);
-  const logits = out.logits!.data as Float32Array;
-  const hOut = out.h_out!.data as Float32Array;
+  const logits = float32Vector(out.logits!.data as ArrayLike<number>);
+  const hOut = float32Vector(out.h_out!.data as ArrayLike<number>);
   return { logits, hidden: hOut };
 }
 

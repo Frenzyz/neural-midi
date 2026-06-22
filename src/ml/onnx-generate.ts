@@ -1,3 +1,4 @@
+import { float32Vector } from "./onnx-tensors.js";
 import { chordAtBeat } from "./chords.js";
 import { mulberry32, quantizeBeat } from "./melody-engine.js";
 import { runMelodyStep, HIDDEN_SIZE, isOnnxReady } from "./onnx-runtime.js";
@@ -68,9 +69,9 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
       chordRootOneHot(chord),
       chordQualityOneHot(chord),
       Math.trunc(pos),
-      hidden,
+      float32Vector(hidden),
     );
-    hidden = new Float32Array(hOut);
+    hidden = Float32Array.from(hOut);
 
     const token = sampleToken(logits, temperature, rng);
     prevToken = token;
