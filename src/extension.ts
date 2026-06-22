@@ -15,6 +15,15 @@ import {
   type EditorResult,
   type SequenceState,
 } from "./ml/sequence.js";
+import {
+  createHistory,
+  currentSnapshot,
+  historyBack,
+  historyForward,
+  nextGenerationSeed,
+  pushSnapshot,
+  type GenerationHistoryState,
+} from "./ml/sequence-history.js";
 import type { ChordMode, Genre, GenerationParams, MidiNote, Scale } from "./ml/types.js";
 import { buildSequenceEditorHtml, modalDialogUrl } from "./ui/sequence-editor.js";
 import { toNumber, resolveTimeSignature } from "./util/coerce.js";
@@ -41,6 +50,8 @@ function editorStateFromDialog(dialog: EditorResult, prev: SequenceState): Seque
   return {
     ...prev,
     notes: dialog.notes,
+    generationHistory: prev.generationHistory,
+    historyIndex: prev.historyIndex,
     key: dialog.key,
     scale: dialog.scale,
     genre: dialog.genre,
@@ -96,11 +107,23 @@ async function runSequenceEditor(
     regionStart: number,
     regionEnd: number,
     fullGenerate: boolean,
+    seed: number,
   ) => Promise<MidiNote[]>,
 ): Promise<MidiNote[] | null> {
   let state = initial;
+  let history: GenerationHistoryState = {
+    snapshots: state.generationHistory,
+    index: state.historyIndex,
+  };
 
   for (;;) {
+    state = {
+      ...state,
+      generationHistory: history.snapshots,
+      historyIndex: history.index,
+      notes: currentSnapshot(history),
+    };
+
     const resultJson = await showModal(modalDialogUrl(buildSequenceEditorHtml(state)));
     if (!resultJson || resultJson === "null") return null;
 
@@ -110,7 +133,19 @@ async function runSequenceEditor(
     if (dialog.action === "cancel") return null;
 
     if (dialog.action === "apply") {
-      return fromMidiNotes(dialog.notes);
+      return fromMidiNotes(currentSnapshot(history));
+    }
+
+    if (dialog.action === "history_back") {
+      const prev = historyBack(history);
+      if (prev) history = prev;
+      continue;
+    }
+
+    if (dialog.action === "history_forward") {
+      const next = historyForward(history);
+      if (next) history = next;
+      continue;
     }
 
     if (dialog.action === "generate_all" || dialog.action === "generate_selection") {
@@ -126,10 +161,21 @@ async function runSequenceEditor(
         regionEnd = sel.end;
       }
 
-      const generated = await generate(dialog, regionStart, regionEnd, fullGenerate);
-      state.notes = fullGenerate
+      const newSeed = nextGenerationSeed(state.seed);
+      const editedSnapshot = fromMidiNotes(dialog.notes);
+      history = {
+        ...history,
+        snapshots: history.snapshots.map((s, i) =>
+          i === history.index ? editedSnapshot : s,
+        ),
+      };
+      const generated = await generate(dialog, regionStart, regionEnd, fullGenerate, newSeed);
+      const merged = fullGenerate
         ? generated
-        : mergeRegionNotes(state.notes, regionStart, regionEnd, generated);
+        : mergeRegionNotes(currentSnapshot(history), regionStart, regionEnd, generated);
+
+      history = pushSnapshot(history, merged);
+      state.seed = newSeed;
       continue;
     }
   }
@@ -168,8 +214,11 @@ export function activate(activation: ActivationContext): void {
         4,
       );
 
+      const initialNotes = toMidiNotes(clip.notes);
+      const history = createHistory(initialNotes);
+
       const initialState: SequenceState = {
-        notes: toMidiNotes(clip.notes),
+        notes: initialNotes,
         key: "C",
         scale: "major",
         genre: "pop",
@@ -180,6 +229,8 @@ export function activate(activation: ActivationContext): void {
         generationMode: initialProgression.length > 0 ? "hybrid" : "melody",
         articulation: "lead",
         chordLabels: chordLabelsPerBar(initialProgression, 4, beatsPerBar),
+        generationHistory: history.snapshots,
+        historyIndex: history.index,
         tempo,
         timeSignature,
         selectionStart: 0,
@@ -195,7 +246,7 @@ export function activate(activation: ActivationContext): void {
       const notes = await runSequenceEditor(
         (url) => ext.ui.showModalDialog(url, 920, 640),
         initialState,
-        async (dialog, regionStart, regionEnd, fullGenerate) => {
+        async (dialog, regionStart, regionEnd, fullGenerate, seed) => {
           const bars = fullGenerate
             ? dialog.bars
             : Math.ceil((regionEnd - regionStart) / beatsPerBar) || 1;
@@ -206,15 +257,18 @@ export function activate(activation: ActivationContext): void {
             dialog.chordMode,
             bars,
           );
-          const params = buildGenerationParams(
-            dialog,
-            tempo,
-            timeSignature,
-            chordProgression.length > 0 ? chordProgression : undefined,
-            regionStart,
-            regionEnd,
-            fullGenerate,
-          );
+          const params = {
+            ...buildGenerationParams(
+              dialog,
+              tempo,
+              timeSignature,
+              chordProgression.length > 0 ? chordProgression : undefined,
+              regionStart,
+              regionEnd,
+              fullGenerate,
+            ),
+            seed,
+          };
           const result = await generateMelody(params);
           const regionBeats = regionEnd - regionStart;
           return result.notes.filter((n) => n.startTime < regionBeats);

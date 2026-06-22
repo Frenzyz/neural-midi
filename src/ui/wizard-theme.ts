@@ -62,6 +62,21 @@ export const WIZARD_CSS = `
   .seg button.active {
     background: var(--dusty-grape); color: var(--text-primary);
   }
+  .gen-nav {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+  }
+  .gen-row { display: flex; align-items: center; gap: 8px; }
+  .hist-btn {
+    width: 28px; height: 28px; border-radius: 6px;
+    border: 1px solid var(--gunmetal);
+    background: var(--shadow-grey);
+    color: var(--text-primary);
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    line-height: 1;
+  }
+  .hist-btn:disabled { opacity: 0.35; cursor: default; }
+  .hist-btn:not(:disabled):hover { border-color: var(--dusty-grape); color: var(--dusty-grape); }
+  .hist-pos { font-size: 10px; color: var(--text-dim); min-width: 36px; text-align: center; }
   .gen-logo {
     width: 88px; height: 88px; border-radius: 50%;
     border: none; padding: 0; cursor: pointer;

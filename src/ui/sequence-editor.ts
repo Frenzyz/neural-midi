@@ -139,6 +139,17 @@ function isNearDivider(x, width) {
   return local < 10 || local > barW - 10;
 }
 
+function updateHistoryControls() {
+  const total = (state.generationHistory && state.generationHistory.length) || 1;
+  const idx = state.historyIndex ?? 0;
+  const pos = document.getElementById("histPos");
+  const back = document.getElementById("histBack");
+  const fwd = document.getElementById("histFwd");
+  if (pos) pos.textContent = (idx + 1) + " / " + total;
+  if (back) back.disabled = idx <= 0;
+  if (fwd) fwd.disabled = idx >= total - 1;
+}
+
 function syncSelectionFromBars() {
   const range = barsToBeatRange(selectedBars, BEATS_PER_BAR);
   state.selectionStart = range.start;
@@ -566,9 +577,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("play").onclick = () => playing ? stopPreview() : playPreview();
   document.getElementById("cancel").onclick = () => { stopPreview(); sendClose({ action: "cancel" }); };
+  document.getElementById("histBack").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "history_back" }); };
+  document.getElementById("histFwd").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "history_forward" }); };
   document.getElementById("generate").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "generate_all" }); };
   document.getElementById("generateSel").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "generate_selection" }); };
   document.getElementById("apply").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "apply" }); };
+  updateHistoryControls();
 });
 </script>
 </head>
@@ -587,7 +601,14 @@ document.addEventListener("DOMContentLoaded", () => {
       <div class="wiz-row"><span class="wiz-label">LENGTH</span>
         ${segButtons("lengthSeg", [["4", "4 BARS"], ["8", "8 BARS"]], String(state.bars === 8 ? 8 : 4))}</div>
     </div>
-    <button class="gen-logo" id="generate" type="button" title="Generate melody">${NM_LOGO_SVG}</button>
+    <div class="gen-nav">
+      <div class="gen-row">
+        <button class="hist-btn" id="histBack" type="button" title="Previous generation">&lt;</button>
+        <span class="hist-pos" id="histPos">${(state.historyIndex ?? 0) + 1} / ${state.generationHistory?.length ?? 1}</span>
+        <button class="hist-btn" id="histFwd" type="button" title="Next generation">&gt;</button>
+      </div>
+      <button class="gen-logo" id="generate" type="button" title="Generate new melody">${NM_LOGO_SVG}</button>
+    </div>
     <div class="wiz-meta">
       <div>Temp <span id="tempVal">${state.temperature.toFixed(2)}</span></div>
       <input type="range" id="temperature" min="0" max="1" step="0.05" value="${state.temperature}" style="width:120px" />

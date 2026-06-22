@@ -1,6 +1,7 @@
-import type { ChordEvent, ChordQuality, MidiNote, Scale } from "./types.js";
+import type { ChordEvent, ChordQuality, Genre, MidiNote, Scale } from "./types.js";
 import { QUALITY_TO_INDEX } from "./types.js";
 import { NOTE_TO_PC, SCALE_INTERVALS } from "./melody-engine.js";
+import { genreEntry } from "./genre-library.js";
 
 const CHORD_TEMPLATES: { quality: ChordQuality; intervals: number[] }[] = [
   { quality: "major", intervals: [0, 4, 7] },
@@ -255,15 +256,17 @@ function chordFromDegree(
   };
 }
 
-/** Fallback I–V–vi–IV when no progression is detected. */
+/** Fallback genre-aware progression when none is detected. */
 export function defaultDiatonicProgression(
   key: string,
   scale: Scale,
   bars: number,
   beatsPerBar: number,
+  genre?: Genre,
 ): ChordEvent[] {
   const rootPc = NOTE_TO_PC[key] ?? 0;
-  const degrees = scale === "natural-minor" ? [0, 4, 2, 5] : [0, 4, 5, 3];
+  const entry = genre ? genreEntry(genre) : null;
+  const degrees = entry?.progressionDegrees ?? (scale === "natural-minor" ? [0, 4, 2, 5] : [0, 4, 5, 3]);
   const progression: ChordEvent[] = [];
   for (let bar = 0; bar < bars; bar++) {
     const degree = degrees[bar % degrees.length]!;

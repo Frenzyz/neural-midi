@@ -1,6 +1,9 @@
 import type { ChordEvent, GenerationParams, MidiNote, Scale } from "./types.js";
 import { chordAtBeat } from "./chords.js";
+import { genreEntry } from "./genre-library.js";
+import { addGhostNotes, applySwing, applyVelocityHumanize } from "./humanize.js";
 import { applyLegatoOverlap, mergeVoices } from "./pattern-engine.js";
+import { mulberry32 } from "./melody-engine.js";
 import {
   NOTE_TO_PC,
   SCALE_INTERVALS,
@@ -124,6 +127,15 @@ export function postProcessMelody(
   }
 
   processed = shapeArticulation(processed, articulation);
+
+  if (mode !== "chords") {
+    const profile = genreEntry(params.genre);
+    const rng = mulberry32(toNumber(params.seed, 1) + 17);
+    const scalePitches = buildScalePitches(rootPc, SCALE_INTERVALS[params.scale] ?? SCALE_INTERVALS.major, 48, 84);
+    processed = applySwing(processed, profile.swing, beatsPerBar);
+    processed = applyVelocityHumanize(processed, rng, profile.velocityAccent);
+    processed = addGhostNotes(processed, scalePitches, rng, profile.ghostNoteChance);
+  }
 
   if (processed.length > 1 && mode === "melody") {
     const lead = processed

@@ -1,6 +1,7 @@
-import type { GenerationParams, GenerationResult, MidiNote, ChordEvent } from "./types.js";
+import type { GenerationParams, GenerationResult, MidiNote } from "./types.js";
 import { resolveTimeSignature, toNumber } from "../util/coerce.js";
 import { chordAtBeat } from "./chords.js";
+import { genreEntry, pickMotifFragments } from "./genre-library.js";
 import {
   GENRE_PROFILES,
   SCALE_INTERVALS,
@@ -12,12 +13,12 @@ import {
 import {
   addHarmonyLayer,
   applyLegatoOverlap,
-  buildMotif,
   mergeVoices,
+  motifFromFragment,
   phraseFromMotifs,
 } from "./pattern-engine.js";
 
-const STUB_VERSION = "stub-0.5.0";
+const STUB_VERSION = "stub-0.6.0";
 
 function cadenceTargetIndex(pitches: number[], rootPc: number, intervals: number[]): number {
   const tonicCandidates = pitches
@@ -39,7 +40,7 @@ function cadenceTargetIndex(pitches: number[], rootPc: number, intervals: number
 
 function enrichWithHarmony(
   notes: MidiNote[],
-  progression: ChordEvent[],
+  progression: import("./types.js").ChordEvent[],
   rng: () => number,
   density: number,
 ): MidiNote[] {
@@ -54,7 +55,7 @@ function enrichWithHarmony(
 }
 
 /**
- * Motif-based melodic generator with phrase repetition, legato overlap, and harmony.
+ * Fragment-based melodic generator with genre motifs and phrase structure.
  */
 export function generateStubMelody(params: GenerationParams): GenerationResult {
   const rng = mulberry32(toNumber(params.seed, 1));
@@ -78,12 +79,9 @@ export function generateStubMelody(params: GenerationParams): GenerationResult {
     };
   }
 
-  const tonicIdx = nearestScaleIndex(pitches, 60 + rootPc);
-  const motifDegreesA = [tonicIdx, tonicIdx + 2, tonicIdx + 4, tonicIdx + 2, tonicIdx + 5, tonicIdx + 4];
-  const motifDegreesB = [tonicIdx + 4, tonicIdx + 2, tonicIdx, tonicIdx + 1, tonicIdx + 2, tonicIdx];
-
-  const motifA = buildMotif(beatsPerBar, motifDegreesA, rng);
-  const motifB = buildMotif(beatsPerBar, motifDegreesB, rng);
+  const [fragA, fragB] = pickMotifFragments(params.genre, rng);
+  const motifA = motifFromFragment(fragA, beatsPerBar, rng);
+  const motifB = motifFromFragment(fragB, beatsPerBar, rng);
 
   let notes = phraseFromMotifs(bars, beatsPerBar, motifA, motifB, pitches, rng);
 
@@ -94,6 +92,7 @@ export function generateStubMelody(params: GenerationParams): GenerationResult {
   notes = applyLegatoOverlap(notes, params.articulation === "pluck" ? 0.05 : 0.1);
 
   if (notes.length === 0) {
+    const tonicIdx = nearestScaleIndex(pitches, 60 + rootPc);
     notes = [{ pitch: pitches[tonicIdx]!, startTime: 0, duration: 0.5, velocity: 90 }];
   } else {
     const lead = notes.filter((n) => n.velocity >= 55).sort((a, b) => a.startTime - b.startTime);

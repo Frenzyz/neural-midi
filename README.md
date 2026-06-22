@@ -4,7 +4,7 @@ An [Ableton Live Extension](https://www.ableton.com/en/live/extensions/) that ge
 
 ## Status
 
-Phrase-based melody engine (`stub-0.4.0`) with **chord-aware generation**, **post-processing** (quantize, chord-tone snap, articulation), and optional **ONNX inference** (`melody-v2.onnx`, falls back to `melody-v1.onnx`). Uses ONNX when a model file is present; otherwise falls back to the rule-based engine.
+Phrase-based melody engine (`stub-0.6.0`) with **genre fragment library**, **generation history**, chord-aware generation, humanization (swing, ghosts, velocity), and optional **ONNX inference** (`melody-v2.onnx`, falls back to `melody-v1.onnx`).
 
 ## Train the ONNX model (multi-dataset)
 
@@ -58,7 +58,7 @@ Inspired by Unison MIDI Wizard:
 | Area | Controls |
 |------|----------|
 | **Top panel** | GENRE, KEY + scale, MODE (Chords / Hybrid / Melody), TYPE (Lead / Pluck), LENGTH (4 / 8 bars) |
-| **Center** | Large **NM** generate button |
+| **Center** | Arcs generate button with **&lt; / &gt;** history navigation and position indicator (e.g. `3 / 7`) |
 | **Chord lane** | Per-bar chord labels (Cm7, Fm7, …) from detected progression |
 | **Piano roll** | Note blocks with pitch labels; drag timeline to select a region |
 | **Velocity row** | Teal velocity stalks per note |
@@ -67,12 +67,13 @@ Inspired by Unison MIDI Wizard:
 | Feature | How |
 |---------|-----|
 | **Preview** | Footer **Play** — Web Audio preview (no clip write) |
-| **Generate all** | Central **NM** button — full sequence from global settings |
-| **Partial generation** | Drag on the timeline → **Generate Selection** |
+| **Generate all** | Central arcs button — new generation each click (auto-incremented seed) |
+| **Generation history** | **&lt;** and **&gt;** browse prior generations in-modal; **Apply to Clip** writes the currently viewed snapshot |
+| **Partial generation** | Select bars → **Generate Selection** (also pushes history) |
 | **Hybrid mode** | Locks melody to chord tones per bar when chords are detected |
 | **Apply to clip** | Writes the edited sequence into the Live clip |
 
-Generation runs on-device (ONNX v2 when available, otherwise stub). The editor reopens after each generate so you can preview and iterate before applying.
+Generation runs on-device (ONNX v2 when available, otherwise stub). See [docs/GENERATION-RESEARCH.md](docs/GENERATION-RESEARCH.md) for MIDI Wizard research and how we approximate fragment-based composition.
 
 ## ONNX runtime in Live
 

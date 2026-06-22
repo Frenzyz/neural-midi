@@ -12,6 +12,8 @@ export interface SequenceState {
   generationMode: GenerationMode;
   articulation: ArticulationType;
   chordLabels: string[];
+  generationHistory: MidiNote[][];
+  historyIndex: number;
   tempo: number;
   timeSignature: { numerator: number; denominator: number };
   selectionStart: number;
@@ -84,7 +86,14 @@ export function notesToPreviewEvents(notes: MidiNote[], tempo: number): PreviewE
 }
 
 export interface EditorResult {
-  action: "cancel" | "apply" | "generate_all" | "generate_selection" | "remap_scale";
+  action:
+    | "cancel"
+    | "apply"
+    | "generate_all"
+    | "generate_selection"
+    | "history_back"
+    | "history_forward"
+    | "remap_scale";
   notes: MidiNote[];
   key: string;
   scale: Scale;

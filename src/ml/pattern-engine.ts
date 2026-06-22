@@ -1,4 +1,5 @@
 import type { MidiNote } from "./types.js";
+import type { MotifFragment } from "./genre-library.js";
 import { quantizeBeat } from "./melody-engine.js";
 
 export const GRID = 0.25;
@@ -44,6 +45,39 @@ export function buildMotif(
       accent: slot.accent,
     });
     deg += rng() < 0.35 ? 0 : 1;
+  }
+  return motif;
+}
+
+/** Build motif from a genre fragment library entry. */
+export function motifFromFragment(
+  fragment: MotifFragment,
+  beatsPerBar: number,
+  rng: () => number,
+): MotifEvent[] {
+  const motif: MotifEvent[] = [];
+  let deg = 0;
+  for (const slot of fragment.slots) {
+    if (rng() < 0.08) continue;
+    motif.push({
+      offset: slot.beatInMotif,
+      degree: fragment.degrees[deg % fragment.degrees.length]!,
+      duration: slot.duration,
+      velocity: slot.accent ? 88 : 74,
+      accent: slot.accent,
+    });
+    deg += 1;
+  }
+  for (const slot of fragment.slots) {
+    if (slot.beatInMotif >= beatsPerBar) continue;
+    if (rng() < 0.12) continue;
+    motif.push({
+      offset: slot.beatInMotif + beatsPerBar,
+      degree: fragment.degrees[deg % fragment.degrees.length]!,
+      duration: slot.duration,
+      velocity: slot.accent ? 80 : 68,
+    });
+    deg += 1;
   }
   return motif;
 }

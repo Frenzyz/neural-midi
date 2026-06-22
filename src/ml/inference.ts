@@ -36,7 +36,7 @@ function progressionForParams(params: GenerationParams): import("./types.js").Ch
     signatureDenominator: params.timeSignature.denominator,
   });
   const bars = Math.max(1, toNumber(params.bars, 4));
-  return defaultDiatonicProgression(params.key, params.scale, bars, beatsPerBar);
+  return defaultDiatonicProgression(params.key, params.scale, bars, beatsPerBar, params.genre);
 }
 
 export async function generateMelody(params: GenerationParams): Promise<GenerationResult> {
