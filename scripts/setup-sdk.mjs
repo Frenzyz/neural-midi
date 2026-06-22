@@ -2,14 +2,14 @@
 // resolve them. The SDK is a private beta distributed by Ableton and is not
 // committed to this repo.
 import { existsSync, mkdirSync, copyFileSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
-function fail(msg: string): never {
+function fail(msg) {
   console.error(`\n  setup-sdk: ${msg}\n`);
   process.exit(1);
 }
 
-function readEnv(name: string): string | undefined {
+function readEnv(name) {
   if (process.env[name]) return process.env[name];
   try {
     const line = readFileSync(".env", "utf8")
@@ -22,7 +22,7 @@ function readEnv(name: string): string | undefined {
   return undefined;
 }
 
-const sdkPath = readEnv("ABLETON_SDK_PATH");
+const sdkPath = resolve(readEnv("ABLETON_SDK_PATH") ?? "");
 if (!sdkPath) {
   fail(
     "ABLETON_SDK_PATH is not set.\n" +

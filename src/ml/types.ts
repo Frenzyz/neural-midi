@@ -26,6 +26,18 @@ export type Genre =
   | "drill"
   | "ambient";
 
+export type ChordQuality = "major" | "minor" | "dom7" | "min7" | "dim" | "sus";
+
+export type ChordMode = "none" | "same-track" | "clip-below";
+
+export interface ChordEvent {
+  startBeat: number;
+  duration: number;
+  rootPc: number;
+  quality: ChordQuality;
+  pitchClasses: number[];
+}
+
 export interface GenerationParams {
   key: string;
   scale: Scale;
@@ -35,6 +47,8 @@ export interface GenerationParams {
   seed: number;
   tempo: number;
   timeSignature: { numerator: number; denominator: number };
+  chordMode: ChordMode;
+  chordProgression?: ChordEvent[];
 }
 
 export interface GenerationResult {
@@ -42,3 +56,14 @@ export interface GenerationResult {
   modelVersion: string;
   usedStub: boolean;
 }
+
+export const CHORD_QUALITY_COUNT = 6;
+
+export const QUALITY_TO_INDEX: Record<ChordQuality, number> = {
+  major: 0,
+  minor: 1,
+  dom7: 2,
+  min7: 3,
+  dim: 4,
+  sus: 5,
+};

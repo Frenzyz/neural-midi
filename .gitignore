@@ -10,4 +10,7 @@ release/
 .env
 .dev/
 vendor/
+sdk/
 models/*.onnx
+training/data/
+.venv/

@@ -5,9 +5,11 @@ import {
   type Handle,
 } from "@ableton-extensions/sdk";
 
-import { generateMelody, loadModel } from "./ml/inference.js";
-import type { Genre, GenerationParams, MidiNote, Scale } from "./ml/types.js";
-import { buildGenerateDialogHtml } from "./ui/generate-dialog.js";
+import { generateMelody, loadModel, setLazyStorageDir } from "./ml/inference.js";
+import { resolveChordProgression } from "./ml/session-chords.js";
+import type { ChordMode, Genre, GenerationParams, MidiNote, Scale } from "./ml/types.js";
+import { buildGenerateDialogHtml, modalDialogUrl } from "./ui/generate-dialog.js";
+import { toNumber, resolveTimeSignature } from "./util/coerce.js";
 
 function toMidiNotes(raw: unknown[]): MidiNote[] {
   return (raw as Record<string, unknown>[]).map((n) => ({
@@ -35,6 +37,7 @@ interface DialogResult {
   bars: number;
   temperature: number;
   seed: number;
+  chordMode: ChordMode;
 }
 
 export function activate(activation: ActivationContext): void {
@@ -43,8 +46,9 @@ export function activate(activation: ActivationContext): void {
 
   const storageDir = ext.environment.storageDirectory;
   if (storageDir) {
+    setLazyStorageDir(storageDir);
     loadModel(storageDir).catch((err) => {
-      console.warn("[Neural Midi] Model load deferred:", err);
+      console.warn("[Neural Midi] Model check deferred:", err);
     });
   }
 
@@ -57,24 +61,24 @@ export function activate(activation: ActivationContext): void {
         return;
       }
 
-      const tempo = song.tempo ?? 120;
-      const timeSignature = {
-        numerator: song.signatureNumerator ?? 4,
-        denominator: song.signatureDenominator ?? 4,
-      };
+      const tempo = toNumber(song.tempo, 120);
+      const timeSignature = resolveTimeSignature(song.scenes[0]);
 
       const resultJson = await ext.ui.showModalDialog(
-        buildGenerateDialogHtml({
-          key: "C",
-          scale: "major",
-          genre: "pop",
-          bars: 4,
-          temperature: 0.7,
-          seed: Math.floor(Math.random() * 1_000_000),
-          tempo,
-        }),
+        modalDialogUrl(
+          buildGenerateDialogHtml({
+            key: "C",
+            scale: "major",
+            genre: "pop",
+            bars: 4,
+            temperature: 0.7,
+            seed: Math.floor(Math.random() * 1_000_000),
+            tempo,
+            chordMode: "same-track",
+          }),
+        ),
         480,
-        420,
+        460,
       );
 
       if (!resultJson || resultJson === "null") return;
@@ -82,15 +86,27 @@ export function activate(activation: ActivationContext): void {
       const dialog = JSON.parse(resultJson) as DialogResult;
       if (dialog.action !== "generate") return;
 
+      const bars = Math.max(1, Math.min(8, toNumber(dialog.bars, 4)));
+      const chordMode = dialog.chordMode ?? "none";
+      const chordProgression = resolveChordProgression(
+        song,
+        clip,
+        args,
+        chordMode,
+        bars,
+      );
+
       const params: GenerationParams = {
         key: dialog.key,
         scale: dialog.scale,
         genre: dialog.genre,
-        bars: Math.max(1, Math.min(8, dialog.bars)),
-        temperature: dialog.temperature,
-        seed: dialog.seed,
+        bars,
+        temperature: toNumber(dialog.temperature, 0.7),
+        seed: toNumber(dialog.seed, 0),
         tempo,
         timeSignature,
+        chordMode,
+        chordProgression: chordProgression.length > 0 ? chordProgression : undefined,
       };
 
       const result = await generateMelody(params);
@@ -101,7 +117,7 @@ export function activate(activation: ActivationContext): void {
       });
 
       console.log(
-        `[Neural Midi] Wrote ${notes.length} notes (model: ${result.modelVersion}, stub: ${result.usedStub})`,
+        `[Neural Midi] Wrote ${notes.length} notes (model: ${result.modelVersion}, stub: ${result.usedStub}, chords: ${chordProgression.length})`,
       );
     } catch (err) {
       console.error("[Neural Midi] generate error:", err);
@@ -115,6 +131,8 @@ export function activate(activation: ActivationContext): void {
       const song = ext.application?.song;
       if (!song) return;
 
+      const chordProgression = resolveChordProgression(song, clip, args, "same-track", 2);
+
       const result = await generateMelody({
         key: "C",
         scale: "major",
@@ -122,11 +140,10 @@ export function activate(activation: ActivationContext): void {
         bars: 2,
         temperature: 0.6,
         seed: Date.now() % 1_000_000,
-        tempo: song.tempo ?? 120,
-        timeSignature: {
-          numerator: song.signatureNumerator ?? 4,
-          denominator: song.signatureDenominator ?? 4,
-        },
+        tempo: toNumber(song.tempo, 120),
+        timeSignature: resolveTimeSignature(song.scenes[0]),
+        chordMode: "same-track",
+        chordProgression: chordProgression.length > 0 ? chordProgression : undefined,
       });
 
       const offset =
@@ -148,4 +165,7 @@ export function activate(activation: ActivationContext): void {
       console.error("[Neural Midi] continue error:", err);
     }
   });
+
+  ext.ui.registerContextMenuAction("MidiClip", "Generate Melody…", "neuralMidi.generate");
+  ext.ui.registerContextMenuAction("MidiClip", "Continue Melody", "neuralMidi.continue");
 }

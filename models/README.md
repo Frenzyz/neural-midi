@@ -1,7 +1,13 @@
-# ONNX model weights (not committed)
+# ONNX model weights
 
-Place trained models here:
+After training:
 
-- `melody-v1.onnx` — primary monophonic melody generator
+```bash
+pip install -r training/requirements.txt
+python training/download_data.py --max-files 200
+python training/train_melody.py --epochs 8
+```
 
-Models are copied into the extension bundle at package time.
+Produces `melody-v1.onnx` here. The extension loads it automatically from this path (dev) or extension storage (packaged).
+
+The file is gitignored by default due to size; commit a release build separately if desired.

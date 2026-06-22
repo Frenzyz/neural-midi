@@ -23,7 +23,7 @@ for (const f of readdirSync(OUT_DIR)) {
 }
 
 const cliBin = join("node_modules", ".bin", process.platform === "win32" ? "extensions-cli.cmd" : "extensions-cli");
-execFileSync(cliBin, ["package", "-o", outPath], { stdio: ["ignore", "ignore", "inherit"] });
+execFileSync(cliBin, ["package", "-o", outPath, "-i", "dist/vendor", "-i", "dist/models"], { stdio: ["ignore", "ignore", "inherit"] });
 
 const sizeMB = (statSync(outPath).size / 1024 / 1024).toFixed(2);
 console.log(`\n  package: ${manifest.name} ${manifest.version} → ${outPath} (${sizeMB} MB)`);

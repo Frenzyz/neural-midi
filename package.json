@@ -10,10 +10,11 @@
   },
   "scripts": {
     "setup": "node scripts/setup-sdk.mjs && npm install",
+    "train": "python training/download_data.py --max-files 200 && python training/train_melody.py --epochs 8",
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && tsx build.ts",
     "build:prod": "npm run typecheck && tsx build.ts --production",
-    "start": "npm run build && extensions-cli run --storage-directory \"$PWD/.dev/storage\" --temp-directory \"$PWD/.dev/temp\"",
+    "start": "npm run build && node scripts/dev-preflight.mjs && extensions-cli run --storage-directory \"$PWD/.dev/storage\" --temp-directory \"$PWD/.dev/temp\"",
     "package": "npm run build:prod && node scripts/package.mjs",
     "test": "vitest run"
   },
