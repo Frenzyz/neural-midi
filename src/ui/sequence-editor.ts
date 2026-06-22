@@ -1,6 +1,6 @@
 import { SCALE_INTERVALS, NOTE_TO_PC } from "../ml/melody-engine.js";
 import type { SequenceState } from "../ml/sequence.js";
-import { WIZARD_CSS } from "./wizard-theme.js";
+import { NM_LOGO_SVG, WIZARD_CSS } from "./wizard-theme.js";
 
 const KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const SCALES: [string, string][] = [
@@ -46,9 +46,9 @@ function segButtons(
 function chordLane(labels: string[], bars: number): string {
   const chips = Array.from({ length: bars }, (_, i) => {
     const label = labels[i] ?? "—";
-    return `<div class="chord-chip">${label}</div>`;
+    return `<div class="chord-chip" data-bar="${i}">${label}</div>`;
   }).join("");
-  return `<div class="chord-lane" style="--bars:${bars}">${chips}</div>`;
+  return `<div class="chord-lane" id="chordLane" style="--bars:${bars}">${chips}</div>`;
 }
 
 export function buildSequenceEditorHtml(state: SequenceState): string {
@@ -70,11 +70,36 @@ export function buildSequenceEditorHtml(state: SequenceState): string {
 const SCALE_INTERVALS = ${scaleJson};
 const NOTE_TO_PC = ${notePcJson};
 const BEATS_PER_BAR = ${beatsPerBar};
+const GRID = 0.25;
 const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const MIN_P = 48, MAX_P = 84;
+const COLORS = {
+  shadow: "#30292f",
+  vintage: "#413f54",
+  dusty: "#5f5aa2",
+  dusk: "#355691",
+  gunmetal: "#3f4045",
+  text: "#e8e6f0",
+  textDim: "#a9a5bc",
+  noteFill: "#f0edf8",
+  noteBorder: "#413f54",
+  selTint: "rgba(95, 90, 162, 0.35)",
+  selBorder: "rgba(95, 90, 162, 0.85)",
+  playhead: "#5f5aa2",
+};
+
 let state = ${initJson};
-let audioCtx = null;
+let selectedBars = beatRangeToBars(state.selectionStart, state.selectionEnd, BEATS_PER_BAR, state.bars);
+let playheadBeat = 0;
 let playing = false;
+let playheadRaf = null;
+let playStartWall = 0;
+let playStartBeat = 0;
+let audioCtx = null;
 let playTimers = [];
+let selectedNoteIndex = null;
+let noteDrag = null;
+let scrubbingPlayhead = false;
 
 const isWebKit = window.webkit?.messageHandlers?.live;
 const isWebView2 = window.chrome?.webview;
@@ -83,6 +108,44 @@ function sendClose(result) {
   const payload = JSON.stringify(result);
   if (isWebKit) window.webkit.messageHandlers.live.postMessage({ method: "close_and_send", params: [payload] });
   else if (isWebView2) window.chrome.webview.postMessage({ method: "close_and_send", params: [payload] });
+}
+
+function quantizeBeat(b) { return Math.round(b / GRID) * GRID; }
+
+function beatRangeToBars(start, end, bpb, totalBars) {
+  const first = Math.max(0, Math.floor(start / bpb));
+  const last = Math.min(totalBars - 1, Math.ceil(end / bpb) - 1);
+  const bars = [];
+  for (let b = first; b <= last; b++) bars.push(b);
+  return bars.length ? bars : [0];
+}
+
+function barsToBeatRange(bars, bpb) {
+  if (!bars.length) return { start: 0, end: bpb };
+  const min = Math.min(...bars), max = Math.max(...bars);
+  return { start: min * bpb, end: (max + 1) * bpb };
+}
+
+function barFromX(x, width) {
+  const barW = width / state.bars;
+  return Math.max(0, Math.min(state.bars - 1, Math.floor(x / barW)));
+}
+
+function isNearDivider(x, width) {
+  const barW = width / state.bars;
+  const bar = Math.floor(x / barW);
+  const local = x - bar * barW;
+  return local < 10 || local > barW - 10;
+}
+
+function syncSelectionFromBars() {
+  const range = barsToBeatRange(selectedBars, BEATS_PER_BAR);
+  state.selectionStart = range.start;
+  state.selectionEnd = range.end;
+  document.querySelectorAll(".chord-chip").forEach((el) => {
+    const b = Number(el.dataset.bar);
+    el.classList.toggle("selected", selectedBars.includes(b));
+  });
 }
 
 function segValue(id) {
@@ -101,11 +164,26 @@ function setupSeg(id, onChange) {
 }
 
 function pitchName(p) {
-  const oct = Math.floor(p / 12) - 1;
-  return NOTE_NAMES[p % 12] + oct;
+  return NOTE_NAMES[p % 12] + (Math.floor(p / 12) - 1);
+}
+
+function snapPitch(pitch) {
+  const key = document.getElementById("key").value;
+  const scale = document.getElementById("scale").value;
+  const root = NOTE_TO_PC[key] ?? 0;
+  const iv = SCALE_INTERVALS[scale] ?? SCALE_INTERVALS.major;
+  let best = pitch, bestD = Infinity;
+  for (let midi = MIN_P; midi <= MAX_P; midi++) {
+    const rel = (midi % 12 - root + 12) % 12;
+    if (!iv.includes(rel)) continue;
+    const d = Math.abs(midi - pitch);
+    if (d < bestD) { bestD = d; best = midi; }
+  }
+  return best;
 }
 
 function collectBase() {
+  const range = barsToBeatRange(selectedBars, BEATS_PER_BAR);
   return {
     notes: state.notes,
     key: document.getElementById("key").value,
@@ -117,8 +195,8 @@ function collectBase() {
     chordMode: document.getElementById("chordMode").value,
     generationMode: segValue("modeSeg"),
     articulation: segValue("typeSeg"),
-    selectionStart: state.selectionStart,
-    selectionEnd: state.selectionEnd,
+    selectionStart: range.start,
+    selectionEnd: range.end,
     useRegionSettings: false,
     regionKey: document.getElementById("key").value,
     regionScale: document.getElementById("scale").value,
@@ -132,12 +210,39 @@ function collectBase() {
 
 function totalBeats() { return state.bars * BEATS_PER_BAR; }
 
+function noteInSelectedBars(n) {
+  const bar = Math.floor(n.startTime / BEATS_PER_BAR);
+  return selectedBars.includes(bar);
+}
+
+function cancelPlayheadAnim() {
+  if (playheadRaf) cancelAnimationFrame(playheadRaf);
+  playheadRaf = null;
+}
+
+function tickPlayhead() {
+  if (!playing) return;
+  const secPerBeat = 60 / Math.max(1, state.tempo);
+  const elapsed = (performance.now() - playStartWall) / 1000;
+  playheadBeat = playStartBeat + elapsed / secPerBeat;
+  const endBeat = Math.max(...state.notes.map(n => n.startTime + n.duration), 0);
+  if (playheadBeat >= endBeat + 0.1) {
+    stopPreview();
+    return;
+  }
+  redraw();
+  playheadRaf = requestAnimationFrame(tickPlayhead);
+}
+
 function stopPreview() {
   playing = false;
+  cancelPlayheadAnim();
   playTimers.forEach(clearTimeout);
   playTimers = [];
   try { audioCtx?.close(); } catch (_) {}
   audioCtx = null;
+  playheadBeat = 0;
+  redraw();
 }
 
 function playPreview() {
@@ -145,6 +250,9 @@ function playPreview() {
   if (!state.notes.length) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   playing = true;
+  playheadBeat = 0;
+  playStartBeat = 0;
+  playStartWall = performance.now();
   const secPerBeat = 60 / Math.max(1, state.tempo);
   const t0 = audioCtx.currentTime + 0.05;
   for (const n of state.notes) {
@@ -160,12 +268,36 @@ function playPreview() {
     osc.start(start);
     osc.stop(start + dur);
   }
-  const endMs = (Math.max(...state.notes.map(n => n.startTime + n.duration)) * secPerBeat + 0.2) * 1000;
-  playTimers.push(setTimeout(() => { playing = false; }, endMs));
+  tickPlayhead();
 }
 
-function beatFromX(x, width) {
-  return Math.max(0, Math.min(totalBeats(), (x / width) * totalBeats()));
+function drawPlayhead(ctx, w, h) {
+  const x = (playheadBeat / totalBeats()) * w;
+  ctx.save();
+  ctx.strokeStyle = COLORS.playhead;
+  ctx.lineWidth = 2 * devicePixelRatio;
+  ctx.shadowColor = COLORS.playhead;
+  ctx.shadowBlur = 6 * devicePixelRatio;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x, h);
+  ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = COLORS.playhead;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x - 5 * devicePixelRatio, 8 * devicePixelRatio);
+  ctx.lineTo(x + 5 * devicePixelRatio, 8 * devicePixelRatio);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawBarHighlights(ctx, w, h) {
+  const barW = w / state.bars;
+  for (const b of selectedBars) {
+    ctx.fillStyle = COLORS.selTint;
+    ctx.fillRect(b * barW, 0, barW, h);
+  }
 }
 
 function drawTimeline() {
@@ -175,22 +307,40 @@ function drawTimeline() {
   const h = c.height = c.clientHeight * devicePixelRatio;
   ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = COLORS.shadow;
+  ctx.fillRect(0,0,w,h);
   const barW = w / state.bars;
+  drawBarHighlights(ctx, w, h);
   for (let b = 0; b < state.bars; b++) {
-    ctx.fillStyle = b % 2 ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.2)";
-    ctx.fillRect(b * barW, 0, barW, h);
-    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+    ctx.strokeStyle = COLORS.gunmetal;
+    ctx.lineWidth = 1 * devicePixelRatio;
     ctx.beginPath(); ctx.moveTo(b * barW, 0); ctx.lineTo(b * barW, h); ctx.stroke();
-    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.fillStyle = COLORS.textDim;
     ctx.font = (10 * devicePixelRatio) + "px sans-serif";
-    ctx.fillText(String(b + 1), b * barW + 4 * devicePixelRatio, 14 * devicePixelRatio);
+    ctx.fillText(String(b + 1), b * barW + 6 * devicePixelRatio, 18 * devicePixelRatio);
   }
-  const sx = (state.selectionStart / totalBeats()) * w;
-  const ex = (state.selectionEnd / totalBeats()) * w;
-  ctx.fillStyle = "rgba(255, 159, 67, 0.25)";
-  ctx.fillRect(sx, 0, ex - sx, h);
-  ctx.strokeStyle = "rgba(255, 159, 67, 0.9)";
-  ctx.strokeRect(sx + 0.5, 0.5, ex - sx - 1, h - 1);
+  ctx.strokeStyle = COLORS.dusty;
+  ctx.lineWidth = 2 * devicePixelRatio;
+  ctx.beginPath(); ctx.moveTo(w - 1, 0); ctx.lineTo(w - 1, h); ctx.stroke();
+  drawPlayhead(ctx, w, h);
+}
+
+function noteRect(n, w, h) {
+  const range = MAX_P - MIN_P;
+  const nh = 14 * devicePixelRatio;
+  const tb = totalBeats();
+  const nw = Math.max(14 * devicePixelRatio, (n.duration / tb) * w);
+  const x = (n.startTime / tb) * w;
+  const y = h - ((n.pitch - MIN_P) / range) * h - nh - 2;
+  return { x, y, w: nw, h: nh };
+}
+
+function hitTestNote(px, py, rect) {
+  const edge = 8 * devicePixelRatio;
+  if (px < rect.x || px > rect.x + rect.w || py < rect.y || py > rect.y + rect.h) return null;
+  if (px - rect.x <= edge) return "resize-left";
+  if (rect.x + rect.w - px <= edge) return "resize-right";
+  return "body";
 }
 
 function drawPianoRoll() {
@@ -200,30 +350,40 @@ function drawPianoRoll() {
   const h = c.height = c.clientHeight * devicePixelRatio;
   ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,w,h);
-  const minP = 48, maxP = 84, range = maxP - minP;
-  for (let p = minP; p <= maxP; p++) {
-    const y = h - ((p - minP) / range) * h;
-    ctx.strokeStyle = p % 12 === 0 ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)";
+  ctx.fillStyle = COLORS.shadow;
+  ctx.fillRect(0,0,w,h);
+  const range = MAX_P - MIN_P;
+  drawBarHighlights(ctx, w, h);
+  for (let p = MIN_P; p <= MAX_P; p++) {
+    const y = h - ((p - MIN_P) / range) * h;
+    ctx.strokeStyle = p % 12 === 0 ? COLORS.gunmetal : "rgba(63,64,69,0.45)";
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+  const barW = w / state.bars;
+  for (let b = 1; b < state.bars; b++) {
+    ctx.strokeStyle = COLORS.gunmetal;
+    ctx.beginPath(); ctx.moveTo(b * barW, 0); ctx.lineTo(b * barW, h); ctx.stroke();
   }
   const tb = totalBeats();
   const fontSize = 8 * devicePixelRatio;
   ctx.font = fontSize + "px sans-serif";
-  for (const n of state.notes) {
-    const x = (n.startTime / tb) * w;
-    const nw = Math.max(14 * devicePixelRatio, (n.duration / tb) * w);
-    const nh = 14 * devicePixelRatio;
-    const y = h - ((n.pitch - minP) / range) * h - nh - 2;
-    const inSel = n.startTime >= state.selectionStart && n.startTime < state.selectionEnd;
+  state.notes.forEach((n, i) => {
+    const rect = noteRect(n, w, h);
+    const inSel = noteInSelectedBars(n);
+    const isNoteSel = selectedNoteIndex === i;
     const r = 4 * devicePixelRatio;
-    ctx.fillStyle = inSel ? "rgba(255, 159, 67, 0.92)" : "rgba(240, 244, 248, 0.9)";
+    ctx.fillStyle = isNoteSel ? COLORS.dusty : (inSel ? "#d8d4ec" : COLORS.noteFill);
+    ctx.strokeStyle = isNoteSel ? COLORS.dusk : COLORS.noteBorder;
+    ctx.lineWidth = (isNoteSel ? 2 : 1) * devicePixelRatio;
     ctx.beginPath();
-    ctx.roundRect(x, y, nw, nh, r);
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, r);
     ctx.fill();
-    ctx.fillStyle = "#1a1a1e";
+    ctx.stroke();
+    ctx.fillStyle = COLORS.shadow;
     const label = pitchName(n.pitch);
-    if (nw > fontSize * 2) ctx.fillText(label, x + 3 * devicePixelRatio, y + nh - 3 * devicePixelRatio);
-  }
+    if (rect.w > fontSize * 2) ctx.fillText(label, rect.x + 3 * devicePixelRatio, rect.y + rect.h - 3 * devicePixelRatio);
+  });
+  drawPlayhead(ctx, w, h);
 }
 
 function drawVelocity() {
@@ -233,51 +393,150 @@ function drawVelocity() {
   const h = c.height = c.clientHeight * devicePixelRatio;
   ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,w,h);
-  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  ctx.fillStyle = COLORS.shadow;
+  ctx.fillRect(0,0,w,h);
+  drawBarHighlights(ctx, w, h);
+  ctx.fillStyle = COLORS.textDim;
   ctx.font = (9 * devicePixelRatio) + "px sans-serif";
-  ctx.fillText("VEL", 4 * devicePixelRatio, 10 * devicePixelRatio);
+  ctx.fillText("VEL", 4 * devicePixelRatio, 12 * devicePixelRatio);
   const tb = totalBeats();
   for (const n of state.notes) {
     const x = (n.startTime / tb) * w + ((n.duration / tb) * w) * 0.5;
     const norm = n.velocity / 127;
     const stalkH = norm * (h * 0.55);
     const baseY = h - 4 * devicePixelRatio;
-    ctx.strokeStyle = "rgba(80, 200, 180, 0.7)";
+    ctx.strokeStyle = COLORS.dusty;
     ctx.lineWidth = 1.5 * devicePixelRatio;
     ctx.beginPath();
     ctx.moveTo(x, baseY);
     ctx.lineTo(x, baseY - stalkH);
     ctx.stroke();
-    ctx.fillStyle = "rgba(80, 220, 200, 0.95)";
+    ctx.fillStyle = COLORS.dusty;
     ctx.beginPath();
     ctx.arc(x, baseY - stalkH, 3 * devicePixelRatio, 0, Math.PI * 2);
     ctx.fill();
   }
+  drawPlayhead(ctx, w, h);
 }
 
 function redraw() { drawTimeline(); drawPianoRoll(); drawVelocity(); }
 
-function setupTimelineDrag() {
-  const c = document.getElementById("timeline");
-  let dragging = false, anchor = 0;
-  c.addEventListener("mousedown", (e) => {
-    dragging = true;
-    const rect = c.getBoundingClientRect();
-    anchor = beatFromX(e.clientX - rect.left, rect.width);
-    state.selectionStart = anchor;
-    state.selectionEnd = Math.min(totalBeats(), anchor + BEATS_PER_BAR);
+function selectBar(bar, extend) {
+  const b = Math.max(0, Math.min(state.bars - 1, bar));
+  if (extend) {
+    if (!selectedBars.includes(b)) selectedBars = [...selectedBars, b].sort((a, c) => a - c);
+  } else {
+    selectedBars = [b];
+  }
+  syncSelectionFromBars();
+  redraw();
+}
+
+function beatFromClientX(canvas, clientX) {
+  const rect = canvas.getBoundingClientRect();
+  const x = (clientX - rect.left) * devicePixelRatio;
+  const w = canvas.width;
+  return Math.max(0, Math.min(totalBeats(), (x / w) * totalBeats()));
+}
+
+function setupTimelineInteraction() {
+  const timeline = document.getElementById("timeline");
+  timeline.addEventListener("mousedown", (e) => {
+    const rect = timeline.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const phX = (playheadBeat / totalBeats()) * rect.width;
+    if (!playing && Math.abs(x - phX) < 12) {
+      scrubbingPlayhead = true;
+      return;
+    }
+    if (isNearDivider(x, rect.width) || e.shiftKey) {
+      selectBar(barFromX(x, rect.width), e.shiftKey);
+      return;
+    }
+    selectBar(barFromX(x, rect.width), false);
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (scrubbingPlayhead && !playing) {
+      playheadBeat = beatFromClientX(timeline, e.clientX);
+      redraw();
+    }
+    if (noteDrag) handleNoteDrag(e);
+  });
+  window.addEventListener("mouseup", () => {
+    scrubbingPlayhead = false;
+    noteDrag = null;
+  });
+}
+
+function setupPianoRollInteraction() {
+  const roll = document.getElementById("pianoRoll");
+  roll.addEventListener("mousedown", (e) => {
+    const rect = roll.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * devicePixelRatio;
+    const py = (e.clientY - rect.top) * devicePixelRatio;
+    const w = roll.width, h = roll.height;
+    let hit = -1, zone = null, nrect = null;
+    for (let i = state.notes.length - 1; i >= 0; i--) {
+      const r = noteRect(state.notes[i], w, h);
+      const z = hitTestNote(px, py, r);
+      if (z) { hit = i; zone = z; nrect = r; break; }
+    }
+    if (hit >= 0) {
+      selectedNoteIndex = hit;
+      const n = state.notes[hit];
+      noteDrag = {
+        mode: zone,
+        index: hit,
+        startX: px,
+        startY: py,
+        origStart: n.startTime,
+        origDur: n.duration,
+        origPitch: n.pitch,
+      };
+      redraw();
+      return;
+    }
+    selectedNoteIndex = null;
+    if (!playing) {
+      playheadBeat = beatFromClientX(roll, e.clientX);
+      scrubbingPlayhead = true;
+    }
     redraw();
   });
-  c.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
-    const rect = c.getBoundingClientRect();
-    const beat = beatFromX(e.clientX - rect.left, rect.width);
-    state.selectionStart = Math.min(anchor, beat);
-    state.selectionEnd = Math.max(anchor, beat);
-    if (state.selectionEnd - state.selectionStart < 0.25) state.selectionEnd = state.selectionStart + 0.25;
-    redraw();
+}
+
+function handleNoteDrag(e) {
+  if (!noteDrag) return;
+  const roll = document.getElementById("pianoRoll");
+  const rect = roll.getBoundingClientRect();
+  const px = (e.clientX - rect.left) * devicePixelRatio;
+  const py = (e.clientY - rect.top) * devicePixelRatio;
+  const w = roll.width, h = roll.height;
+  const tb = totalBeats();
+  const dxBeat = ((px - noteDrag.startX) / w) * tb;
+  const n = state.notes[noteDrag.index];
+  if (noteDrag.mode === "body") {
+    n.startTime = quantizeBeat(Math.max(0, Math.min(tb - GRID, noteDrag.origStart + dxBeat)));
+    const range = MAX_P - MIN_P;
+    const dyPitch = -((py - noteDrag.startY) / h) * range;
+    n.pitch = snapPitch(Math.round(noteDrag.origPitch + dyPitch));
+  } else if (noteDrag.mode === "resize-right") {
+    n.duration = quantizeBeat(Math.max(GRID, noteDrag.origDur + dxBeat));
+  } else if (noteDrag.mode === "resize-left") {
+    const newStart = quantizeBeat(Math.max(0, noteDrag.origStart + dxBeat));
+    const delta = newStart - noteDrag.origStart;
+    n.startTime = newStart;
+    n.duration = quantizeBeat(Math.max(GRID, noteDrag.origDur - delta));
+  }
+  redraw();
+}
+
+function setupChordLaneClicks() {
+  document.getElementById("chordLane").addEventListener("click", (e) => {
+    const chip = e.target.closest(".chord-chip");
+    if (!chip) return;
+    selectBar(Number(chip.dataset.bar), e.shiftKey);
   });
-  window.addEventListener("mouseup", () => { dragging = false; });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -289,15 +548,22 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSeg("typeSeg");
   setupSeg("lengthSeg", (v) => {
     state.bars = Number(v);
-    state.selectionEnd = Math.min(totalBeats(), state.selectionStart + BEATS_PER_BAR);
+    selectedBars = selectedBars.filter((b) => b < state.bars);
+    if (!selectedBars.length) selectedBars = [0];
+    syncSelectionFromBars();
+    const lane = document.getElementById("chordLane");
+    lane.style.setProperty("--bars", state.bars);
     redraw();
   });
 
-  setupTimelineDrag();
+  syncSelectionFromBars();
+  setupTimelineInteraction();
+  setupPianoRollInteraction();
+  setupChordLaneClicks();
   redraw();
   window.addEventListener("resize", redraw);
 
-  document.getElementById("play").onclick = () => playPreview();
+  document.getElementById("play").onclick = () => playing ? stopPreview() : playPreview();
   document.getElementById("cancel").onclick = () => { stopPreview(); sendClose({ action: "cancel" }); };
   document.getElementById("generate").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "generate_all" }); };
   document.getElementById("generateSel").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "generate_selection" }); };
@@ -320,7 +586,7 @@ document.addEventListener("DOMContentLoaded", () => {
       <div class="wiz-row"><span class="wiz-label">LENGTH</span>
         ${segButtons("lengthSeg", [["4", "4 BARS"], ["8", "8 BARS"]], String(state.bars === 8 ? 8 : 4))}</div>
     </div>
-    <button class="gen-circle" id="generate" type="button" title="Generate melody">NM</button>
+    <button class="gen-logo" id="generate" type="button" title="Generate melody">${NM_LOGO_SVG}</button>
     <div class="wiz-meta">
       <div>Temp <span id="tempVal">${state.temperature.toFixed(2)}</span></div>
       <input type="range" id="temperature" min="0" max="1" step="0.05" value="${state.temperature}" style="width:120px" />
