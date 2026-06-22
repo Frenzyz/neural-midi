@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateStubMelody } from "../src/ml/stub.js";
+import { generateStubMelody } from "./stub.js";
 
 describe("generateStubMelody", () => {
   it("produces deterministic output for the same seed", () => {
