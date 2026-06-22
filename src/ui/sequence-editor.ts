@@ -194,6 +194,27 @@ function snapPitch(pitch) {
   return best;
 }
 
+function removeNoteAtIndex(notes, index) {
+  if (index < 0 || index >= notes.length) return notes;
+  return notes.filter((_, i) => i !== index);
+}
+
+function updateDeleteButton() {
+  const btn = document.getElementById("deleteNote");
+  if (!btn) return;
+  const hasSel = selectedNoteIndex !== null && selectedNoteIndex >= 0;
+  btn.disabled = !hasSel;
+  btn.style.opacity = hasSel ? "1" : "0.45";
+}
+
+function deleteSelectedNote() {
+  if (selectedNoteIndex === null || selectedNoteIndex < 0) return;
+  state.notes = removeNoteAtIndex(state.notes, selectedNoteIndex);
+  selectedNoteIndex = null;
+  updateDeleteButton();
+  redraw();
+}
+
 function collectBase() {
   const range = barsToBeatRange(selectedBars, BEATS_PER_BAR);
   return {
@@ -501,6 +522,7 @@ function setupPianoRollInteraction() {
     }
     if (hit >= 0) {
       selectedNoteIndex = hit;
+      updateDeleteButton();
       const n = state.notes[hit];
       noteDrag = {
         mode: zone,
@@ -515,11 +537,27 @@ function setupPianoRollInteraction() {
       return;
     }
     selectedNoteIndex = null;
+    updateDeleteButton();
     if (!playing) {
       playheadBeat = beatFromClientX(roll, e.clientX);
       scrubbingPlayhead = true;
     }
     redraw();
+  });
+  roll.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    const rect = roll.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * devicePixelRatio;
+    const py = (e.clientY - rect.top) * devicePixelRatio;
+    const w = roll.width, h = roll.height;
+    for (let i = state.notes.length - 1; i >= 0; i--) {
+      const r = noteRect(state.notes[i], w, h);
+      if (hitTestNote(px, py, r)) {
+        selectedNoteIndex = i;
+        deleteSelectedNote();
+        return;
+      }
+    }
   });
 }
 
@@ -593,6 +631,16 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("generate").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "generate_all" }); };
   document.getElementById("generateSel").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "generate_selection" }); };
   document.getElementById("apply").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "apply" }); };
+  document.getElementById("deleteNote").onclick = () => { deleteSelectedNote(); };
+  document.addEventListener("keydown", (e) => {
+    const tag = e.target && e.target.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+    if ((e.key === "Delete" || e.key === "Backspace") && selectedNoteIndex !== null) {
+      e.preventDefault();
+      deleteSelectedNote();
+    }
+  });
+  updateDeleteButton();
   updateHistoryControls();
 });
 </script>
@@ -652,6 +700,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   <div class="wiz-footer">
     <button class="play-btn" id="play" type="button" title="Preview">&#9654;</button>
+    <button class="wiz-btn" id="deleteNote" type="button" title="Delete selected note (Del)" disabled style="opacity:0.45">&#128465;</button>
     <div class="footer-actions">
       <button class="wiz-btn" id="cancel" type="button">Cancel</button>
       <button class="wiz-btn" id="generateSel" type="button">Generate Selection</button>

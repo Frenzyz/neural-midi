@@ -3,6 +3,7 @@ import {
   addHarmonyLayer,
   applyLegatoOverlap,
   buildMotif,
+  ensureMotifPitchVariation,
   mergeVoices,
   motifToNotes,
   phraseFromMotifs,
@@ -63,5 +64,16 @@ describe("pattern-engine", () => {
     const motif = [{ offset: 0, degree: 2, duration: 0.5, velocity: 80 }];
     const notes = motifToNotes(motif, 0, pitches, pitches.length - 1);
     expect(notes[0]!.pitch).toBe(64);
+  });
+
+  it("ensures pitch variation within each bar of a motif", () => {
+    const flat = [
+      { offset: 0, degree: 2, duration: 0.5, velocity: 80 },
+      { offset: 1, degree: 2, duration: 0.5, velocity: 76 },
+      { offset: 2, degree: 2, duration: 0.5, velocity: 78 },
+    ];
+    const varied = ensureMotifPitchVariation(flat, 4);
+    const bar0 = varied.filter((e) => e.offset < 4);
+    expect(new Set(bar0.map((e) => e.degree)).size).toBeGreaterThan(1);
   });
 });

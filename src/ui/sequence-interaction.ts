@@ -119,3 +119,49 @@ export function hitTestNote(
   if (rect.x + rect.w - px <= edgePx) return "resize-right";
   return "body";
 }
+
+export interface MidiNoteLike {
+  pitch: number;
+  startTime: number;
+  duration: number;
+  velocity: number;
+}
+
+/** Remove note at index; returns new array (immutable). */
+export function removeNoteAtIndex<T extends MidiNoteLike>(notes: T[], index: number): T[] {
+  if (index < 0 || index >= notes.length) return notes;
+  return notes.filter((_, i) => i !== index);
+}
+
+const LEAD_VELOCITY_MIN = 55;
+
+/** Longest continuous span (beats) of the same lead pitch, including legato chains. */
+export function maxContinuousSamePitchBeats(
+  notes: MidiNoteLike[],
+  leadVelocityMin = LEAD_VELOCITY_MIN,
+): number {
+  const lead = [...notes]
+    .filter((n) => n.velocity >= leadVelocityMin)
+    .sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
+  if (lead.length === 0) return 0;
+
+  let maxSpan = lead[0]!.duration;
+  let chainPitch = lead[0]!.pitch;
+  let chainStart = lead[0]!.startTime;
+  let chainEnd = lead[0]!.startTime + lead[0]!.duration;
+
+  for (let i = 1; i < lead.length; i++) {
+    const n = lead[i]!;
+    const gap = n.startTime - chainEnd;
+    if (n.pitch === chainPitch && gap <= GRID_BEATS * 1.15) {
+      chainEnd = n.startTime + n.duration;
+      maxSpan = Math.max(maxSpan, chainEnd - chainStart);
+    } else {
+      maxSpan = Math.max(maxSpan, n.duration);
+      chainPitch = n.pitch;
+      chainStart = n.startTime;
+      chainEnd = n.startTime + n.duration;
+    }
+  }
+  return maxSpan;
+}

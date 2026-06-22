@@ -6,6 +6,10 @@ export interface ExpressionKnobs {
   restResampleProb: number;
   /** ONNX logit penalty when same pitch would repeat 3+ times. */
   repeatPitchPenalty: number;
+  /** Extra logit penalty when same pitch spans >1 beat in sampling. */
+  sustainRepeatPenalty: number;
+  /** Max melody note duration (beats) before post-process split. */
+  maxMelodyNoteDuration: number;
   /** addHarmonyLayer / addHarmonicStacks density 0–1. */
   harmonyDensity: number;
   /** Dense style: add chord accompaniment even in melody mode. */
@@ -25,7 +29,9 @@ export function resolveExpression(params: GenerationParams): ExpressionKnobs {
   const temperature = Math.max(0.1, toNumber(params.temperature, 0.7));
 
   let restResampleProb = 0.08 + expression * 0.22;
-  let repeatPitchPenalty = 1.2 + expression * 1.8;
+  let repeatPitchPenalty = 2.0 + expression * 2.0;
+  let sustainRepeatPenalty = 2.5 + (1 - expression) * 2.5;
+  let maxMelodyNoteDuration = 1.75 - expression * 0.25;
   let harmonyDensity = 0.25 + expression * 0.35;
   let hybridAccompaniment = false;
   let ghostNoteChance = 0;
@@ -50,6 +56,8 @@ export function resolveExpression(params: GenerationParams): ExpressionKnobs {
   return {
     restResampleProb,
     repeatPitchPenalty,
+    sustainRepeatPenalty,
+    maxMelodyNoteDuration: Math.max(1.0, maxMelodyNoteDuration),
     harmonyDensity,
     hybridAccompaniment,
     ghostNoteChance,

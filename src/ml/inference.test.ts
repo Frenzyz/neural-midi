@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateMelody, isModelLoaded } from "./inference.js";
+import { maxContinuousSamePitchBeats } from "./post-process.js";
 import { maxConsecutiveSamePitch } from "./taste-filter.js";
 import type { GenerationParams } from "./types.js";
 
@@ -109,5 +110,20 @@ describe("inference", () => {
       ],
     });
     expect(result.notes.length).toBeGreaterThan(4);
+  });
+
+  it("4-bar output avoids sustained single pitch beyond 2 beats", async () => {
+    const result = await generateMelody({
+      ...params,
+      genre: "lofi",
+      generationMode: "melody",
+      bars: 4,
+      seed: 884568,
+      key: "D",
+      expression: 0.5,
+      tightenPhrasing: false,
+    });
+    expect(result.notes.length).toBeGreaterThanOrEqual(4);
+    expect(maxContinuousSamePitchBeats(result.notes)).toBeLessThanOrEqual(2.01);
   });
 });

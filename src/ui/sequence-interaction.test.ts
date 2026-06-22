@@ -5,8 +5,10 @@ import {
   barsToBeatRange,
   beatRangeToBars,
   hitTestNote,
+  maxContinuousSamePitchBeats,
   noteCanvasRect,
   quantizeBeat,
+  removeNoteAtIndex,
   snapPitchToScale,
   toggleBarSelection,
 } from "./sequence-interaction.js";
@@ -55,5 +57,27 @@ describe("sequence-interaction", () => {
     const r = noteCanvasRect(0, 1, 60, 400, 200, 4, 48, 84, 14);
     expect(r.w).toBeGreaterThan(0);
     expect(r.y).toBeLessThan(200);
+  });
+
+  it("removes note at index from array", () => {
+    const notes = [
+      { pitch: 60, startTime: 0, duration: 0.5, velocity: 80 },
+      { pitch: 62, startTime: 1, duration: 0.5, velocity: 76 },
+      { pitch: 64, startTime: 2, duration: 0.5, velocity: 82 },
+    ];
+    const out = removeNoteAtIndex(notes, 1);
+    expect(out).toHaveLength(2);
+    expect(out.map((n) => n.pitch)).toEqual([60, 64]);
+    expect(removeNoteAtIndex(notes, -1)).toBe(notes);
+    expect(removeNoteAtIndex(notes, 99)).toBe(notes);
+  });
+
+  it("measures continuous same-pitch span", () => {
+    const notes = [
+      { pitch: 60, startTime: 0, duration: 1.0, velocity: 80 },
+      { pitch: 60, startTime: 1.0, duration: 1.5, velocity: 78 },
+      { pitch: 62, startTime: 3, duration: 0.5, velocity: 80 },
+    ];
+    expect(maxContinuousSamePitchBeats(notes)).toBeCloseTo(2.5, 2);
   });
 });

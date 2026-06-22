@@ -15,6 +15,29 @@ export interface MotifEvent {
   accent?: boolean;
 }
 
+/** Ensure at least two distinct degrees per bar within a motif. */
+export function ensureMotifPitchVariation(motif: MotifEvent[], beatsPerBar: number): MotifEvent[] {
+  if (motif.length < 2 || beatsPerBar <= 0) return motif;
+  const result = motif.map((e) => ({ ...e }));
+  const maxOffset = Math.max(...result.map((e) => e.offset));
+  const barsInMotif = Math.max(1, Math.ceil((maxOffset + 0.01) / beatsPerBar));
+
+  for (let bar = 0; bar < barsInMotif; bar++) {
+    const barStart = bar * beatsPerBar;
+    const barEnd = barStart + beatsPerBar;
+    const inBar = result.filter((e) => e.offset >= barStart && e.offset < barEnd);
+    if (inBar.length < 2) continue;
+    const degrees = new Set(inBar.map((e) => e.degree));
+    if (degrees.size > 1) continue;
+    const mid = inBar[Math.floor(inBar.length / 2)]!;
+    const idx = result.findIndex((e) => e === mid);
+    if (idx >= 0) {
+      result[idx] = { ...result[idx]!, degree: result[idx]!.degree + 1 };
+    }
+  }
+  return result;
+}
+
 /** Build a 2-bar rhythmic motif from scale degrees. */
 export function buildMotif(
   beatsPerBar: number,
@@ -47,7 +70,7 @@ export function buildMotif(
     });
     deg += rng() < 0.35 ? 0 : 1;
   }
-  return motif;
+  return ensureMotifPitchVariation(motif, beatsPerBar);
 }
 
 /** Build motif from a genre fragment library entry. */
@@ -80,7 +103,7 @@ export function motifFromFragment(
     });
     deg += 1;
   }
-  return motif;
+  return ensureMotifPitchVariation(motif, beatsPerBar);
 }
 
 export function varyMotif(motif: MotifEvent[], rng: () => number, rate = 0.35): MotifEvent[] {

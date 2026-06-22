@@ -3,6 +3,7 @@ import { chordAtBeat } from "./chords.js";
 import { resolveExpression } from "./expression.js";
 import { addHarmonyLayer, applyLegatoOverlap, mergeVoices } from "./pattern-engine.js";
 import { mulberry32, quantizeBeat } from "./melody-engine.js";
+import { splitOversustainedNotes } from "./post-process.js";
 import { runMelodyStep, getHiddenStateSize, getOnnxModelVersion, isOnnxReady } from "./onnx-runtime.js";
 import {
   chordQualityOneHot,
@@ -34,18 +35,23 @@ function sampleToken(logits: Float32Array, temperature: number, rng: () => numbe
   return REST_TOKEN;
 }
 
-/** Down-weight same pitch token when it would extend a 2-note repeat streak. */
+/** Down-weight same pitch token when repeat streak would extend. */
 function applyRepeatPitchPenalty(
   logits: Float32Array,
   recentPitchTokens: number[],
   penalty: number,
+  sustainPenalty: number,
+  consecutiveGridSteps: number,
 ): void {
   if (recentPitchTokens.length < 2 || penalty <= 0) return;
   const last = recentPitchTokens[recentPitchTokens.length - 1]!;
   const prev = recentPitchTokens[recentPitchTokens.length - 2]!;
-  if (last !== REST_TOKEN && last === prev) {
-    logits[last] = (logits[last] ?? 0) - penalty;
-  }
+  if (last === REST_TOKEN || last !== prev) return;
+
+  let p = penalty;
+  if (consecutiveGridSteps > 4) p += sustainPenalty;
+  if (consecutiveGridSteps > 8) p += sustainPenalty * 0.75;
+  logits[last] = (logits[last] ?? 0) - p;
 }
 
 function tokenToMidiPitch(token: number, octave: number): number {
@@ -72,6 +78,7 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
   let hidden = new Float32Array(getHiddenStateSize());
   const notes: MidiNote[] = [];
   const recentPitchTokens: number[] = [];
+  let consecutiveSamePitchSteps = 0;
   let octave = 5;
   let lastPitch = 60;
 
@@ -90,25 +97,47 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
     hidden = Float32Array.from(hOut);
 
     const logitsForSample = Float32Array.from(logits);
-    applyRepeatPitchPenalty(logitsForSample, recentPitchTokens, expr.repeatPitchPenalty);
+    applyRepeatPitchPenalty(
+      logitsForSample,
+      recentPitchTokens,
+      expr.repeatPitchPenalty,
+      expr.sustainRepeatPenalty,
+      consecutiveSamePitchSteps,
+    );
 
     const token = sampleToken(logitsForSample, temperature, rng);
     prevToken = token;
 
     let pitchToken = token;
     if (pitchToken === REST_TOKEN && rng() < expr.restResampleProb) {
-      applyRepeatPitchPenalty(logitsForSample, recentPitchTokens, expr.repeatPitchPenalty);
+      applyRepeatPitchPenalty(
+        logitsForSample,
+        recentPitchTokens,
+        expr.repeatPitchPenalty,
+        expr.sustainRepeatPenalty,
+        consecutiveSamePitchSteps,
+      );
       pitchToken = sampleToken(logitsForSample, Math.max(0.2, temperature * 0.9), rng);
       prevToken = pitchToken;
     }
 
-    if (pitchToken === REST_TOKEN) continue;
+    if (pitchToken === REST_TOKEN) {
+      consecutiveSamePitchSteps = 0;
+      continue;
+    }
+
+    const prevPitchTok = recentPitchTokens[recentPitchTokens.length - 1];
+    if (prevPitchTok === pitchToken) {
+      consecutiveSamePitchSteps++;
+    } else {
+      consecutiveSamePitchSteps = 1;
+    }
 
     recentPitchTokens.push(pitchToken);
     if (recentPitchTokens.length > 4) recentPitchTokens.shift();
 
-    const durationChoices = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
-    const durationWeights = [0.12, 0.2, 0.28, 0.15, 0.15, 0.1];
+    const durationChoices = [0.5, 0.75, 1.0, 1.25, 1.5];
+    const durationWeights = [0.15, 0.22, 0.28, 0.2, 0.15];
     let durRoll = rng();
     let noteDuration = 1.0;
     for (let di = 0; di < durationChoices.length; di++) {
@@ -117,6 +146,10 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
         noteDuration = durationChoices[di]!;
         break;
       }
+    }
+    noteDuration = Math.min(noteDuration, expr.maxMelodyNoteDuration);
+    if (consecutiveSamePitchSteps > 4) {
+      noteDuration = Math.min(noteDuration, 0.75);
     }
 
     let pitch = tokenToMidiPitch(pitchToken, octave);
@@ -156,6 +189,7 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
 
   const mode = params.generationMode ?? (progression.length ? "hybrid" : "melody");
   let enriched = applyLegatoOverlap(deduped, 0.08);
+  enriched = splitOversustainedNotes(enriched, expr.maxMelodyNoteDuration);
 
   if (mode !== "chords" && progression.length > 0 && mode === "hybrid") {
     const extraLayers: MidiNote[][] = [];

@@ -142,7 +142,12 @@ async function runSequenceEditor(
     if (dialog.action === "cancel") return null;
 
     if (dialog.action === "apply") {
-      return fromMidiNotes(currentSnapshot(history));
+      const edited = fromMidiNotes(dialog.notes);
+      history = {
+        ...history,
+        snapshots: history.snapshots.map((s, i) => (i === history.index ? edited : s)),
+      };
+      return edited;
     }
 
     if (dialog.action === "history_back") {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { postProcessMelody } from "./post-process.js";
+import { postProcessMelody, splitOversustainedNotes } from "./post-process.js";
 import type { GenerationParams, MidiNote } from "./types.js";
 
 const base: GenerationParams = {
@@ -47,5 +47,16 @@ describe("post-process", () => {
       { mode: "hybrid" },
     );
     expect([60, 64, 67]).toContain(out[0]!.pitch);
+  });
+
+  it("splits oversustained same-pitch notes with stepwise variation", () => {
+    const raw: MidiNote[] = [
+      { pitch: 60, startTime: 0, duration: 4, velocity: 80 },
+    ];
+    const scalePitches = [60, 62, 64, 65, 67, 69, 71, 72];
+    const out = splitOversustainedNotes(raw, 1.5, scalePitches);
+    expect(out.length).toBeGreaterThan(1);
+    expect(out.some((n) => n.pitch !== 60)).toBe(true);
+    expect(out[out.length - 1]!.startTime + out[out.length - 1]!.duration).toBeCloseTo(4, 1);
   });
 });
