@@ -1,9 +1,15 @@
 import { float32Vector } from "./onnx-tensors.js";
 import { chordAtBeat } from "./chords.js";
 import { resolveExpression } from "./expression.js";
-import { addHarmonyLayer, applyLegatoOverlap, mergeVoices } from "./pattern-engine.js";
-import { mulberry32, quantizeBeat } from "./melody-engine.js";
-import { splitOversustainedNotes } from "./post-process.js";
+import {
+  DEFAULT_GRID_DIVISION,
+  gridStepBeats,
+  slotIndex,
+  snapDurationToGrid,
+  snapToGrid,
+} from "./grid-quantize.js";
+import { addHarmonyLayer, mergeVoices } from "./pattern-engine.js";
+import { mulberry32 } from "./melody-engine.js";
 import { runMelodyStep, getHiddenStateSize, getOnnxModelVersion, isOnnxReady } from "./onnx-runtime.js";
 import {
   chordQualityOneHot,
@@ -71,8 +77,10 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
   const expr = resolveExpression(params);
   const temperature = expr.sampleTemperature;
   const progression = params.chordProgression ?? [];
-  const grid = 0.25;
+  const grid = gridStepBeats(beatsPerBar, DEFAULT_GRID_DIVISION);
   const steps = Math.ceil(totalBeats / grid);
+  const mode = params.generationMode ?? (progression.length ? "hybrid" : "melody");
+  const occupiedSlots = new Set<number>();
 
   let prevToken = REST_TOKEN;
   let hidden = new Float32Array(getHiddenStateSize());
@@ -83,7 +91,8 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
   let lastPitch = 60;
 
   for (let step = 0; step < steps; step++) {
-    const beat = step * grid;
+    const beat = snapToGrid(step * grid, grid);
+    const slot = slotIndex(beat, grid);
     const chord = chordAtBeat(progression, beat);
     const pos = positionIndex(beat % beatsPerBar, beatsPerBar);
 
@@ -126,6 +135,8 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
       continue;
     }
 
+    if (mode === "melody" && occupiedSlots.has(slot)) continue;
+
     const prevPitchTok = recentPitchTokens[recentPitchTokens.length - 1];
     if (prevPitchTok === pitchToken) {
       consecutiveSamePitchSteps++;
@@ -151,52 +162,45 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
     if (consecutiveSamePitchSteps > 4) {
       noteDuration = Math.min(noteDuration, 0.75);
     }
+    noteDuration = snapDurationToGrid(noteDuration, grid);
 
     let pitch = tokenToMidiPitch(pitchToken, octave);
 
     if (Math.abs(pitch - lastPitch) > 7) {
       octave += pitch > lastPitch ? 1 : -1;
       octave = Math.max(4, Math.min(6, octave));
-      pitch = tokenToMidiPitch(token, octave);
+      pitch = tokenToMidiPitch(pitchToken, octave);
     }
 
     if (pitch < 48) {
       octave++;
-      pitch = tokenToMidiPitch(token, octave);
+      pitch = tokenToMidiPitch(pitchToken, octave);
     }
     if (pitch > 84) {
       octave--;
-      pitch = tokenToMidiPitch(token, octave);
+      pitch = tokenToMidiPitch(pitchToken, octave);
     }
 
     notes.push({
       pitch,
-      startTime: quantizeBeat(beat),
+      startTime: beat,
       duration: noteDuration,
       velocity: 72 + Math.floor(rng() * 30),
     });
+    occupiedSlots.add(slot);
     lastPitch = pitch;
   }
 
-  const deduped: MidiNote[] = [];
-  for (const n of notes) {
-    const prev = deduped[deduped.length - 1];
-    if (prev && Math.abs(prev.startTime - n.startTime) < 0.01) continue;
-    deduped.push(n);
-  }
+  if (notes.length === 0) return null;
 
-  if (deduped.length === 0) return null;
-
-  const mode = params.generationMode ?? (progression.length ? "hybrid" : "melody");
-  let enriched = applyLegatoOverlap(deduped, 0.08);
-  enriched = splitOversustainedNotes(enriched, expr.maxMelodyNoteDuration);
+  let enriched: MidiNote[] = notes;
 
   if (mode !== "chords" && progression.length > 0 && mode === "hybrid") {
     const extraLayers: MidiNote[][] = [];
-    for (const n of deduped) {
+    for (const n of notes) {
       const chord = chordAtBeat(progression, n.startTime);
       if (!chord) continue;
-      const extra = addHarmonyLayer([n], chord.pitchClasses, rng, 0.35);
+      const extra = addHarmonyLayer([n], chord.pitchClasses, rng, Math.min(0.35, expr.harmonyDensity));
       if (extra.length > 1) extraLayers.push(extra.slice(1));
     }
     enriched = mergeVoices(enriched, ...extraLayers);

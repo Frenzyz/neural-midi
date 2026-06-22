@@ -7,6 +7,7 @@ import {
   generateHybridAccompaniment,
 } from "./chords.js";
 import { resolveExpression } from "./expression.js";
+import { applyGridPipeline, type GridQuantizeOptions } from "./grid-quantize.js";
 import { mulberry32 } from "./melody-engine.js";
 import { postProcessHybrid, postProcessMelody } from "./post-process.js";
 import { addHarmonicStacks } from "./pattern-engine.js";
@@ -70,10 +71,17 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
       progression,
       articulation,
     });
-    const notes = postProcessMelody(chordNotes, { ...params, chordProgression: progression }, {
-      mode: "chords",
-      articulation,
-    });
+    const notes = applyFinalGrid(
+      postProcessMelody(chordNotes, { ...params, chordProgression: progression }, {
+        mode: "chords",
+        articulation,
+      }),
+      { ...params, chordProgression: progression },
+      "chords",
+      beatsPerBar,
+      bars,
+    );
+    logNoteCount("after grid", notes);
     return {
       notes,
       modelVersion: "chord-voicing-1.0",
@@ -122,12 +130,32 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
     logNoteCount("hybrid-layer", notes);
   }
 
+  notes = applyFinalGrid(notes, params, mode, beatsPerBar, bars);
+  logNoteCount("after grid", notes);
+
   if (params.tightenPhrasing) {
     notes = applyLightTasteFilter(notes, { mode, seed: toNumber(params.seed, 1) });
     logNoteCount("tighten", notes);
   }
 
   return { ...result, notes };
+}
+
+function applyFinalGrid(
+  notes: MidiNote[],
+  params: GenerationParams,
+  mode: "chords" | "hybrid" | "melody",
+  beatsPerBar: number,
+  bars: number,
+): MidiNote[] {
+  const style = params.stylePreset ?? "expressive";
+  const gridOpts: GridQuantizeOptions = {
+    beatsPerBar,
+    bars,
+    mode,
+    stylePreset: style,
+  };
+  return applyGridPipeline(notes, gridOpts);
 }
 
 let lazyStorageDir: string | null = null;

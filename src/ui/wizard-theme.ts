@@ -28,13 +28,35 @@ export const WIZARD_CSS = `
   }
   .wiz-top {
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    grid-template-columns: auto 1fr auto 1fr;
     gap: 12px;
     padding: 10px 14px 8px;
     align-items: center;
     min-height: 120px;
     background: var(--vintage-grape);
     border-bottom: 1px solid var(--gunmetal);
+  }
+  .wiz-brand {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding-right: 4px;
+    min-width: 56px;
+  }
+  .wiz-brand svg {
+    width: 52px;
+    height: auto;
+    display: block;
+  }
+  .wiz-brand-label {
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    white-space: nowrap;
   }
   .wiz-params { display: flex; flex-direction: column; gap: 6px; }
   .wiz-row { display: flex; align-items: center; gap: 8px; }

@@ -2,7 +2,7 @@ import type { ChordEvent, GenerationParams, MidiNote, Scale } from "./types.js";
 import { chordAtBeat } from "./chords.js";
 import { genreEntry } from "./genre-library.js";
 import { addGhostNotes, applySwing, applyVelocityHumanize } from "./humanize.js";
-import { applyLegatoOverlap, mergeVoices } from "./pattern-engine.js";
+import { mergeVoices } from "./pattern-engine.js";
 import { mulberry32 } from "./melody-engine.js";
 import {
   NOTE_TO_PC,
@@ -246,7 +246,6 @@ export function postProcessMelody(
   });
   const progression = params.chordProgression ?? [];
   const hybridBias = mode === "hybrid" ? 0.72 : mode === "chords" ? 0.88 : 0.15;
-  const allowOverlap = mode !== "chords";
 
   let processed = notes.map((n) => {
     const startTime = quantizeBeat(n.startTime, GRID);
@@ -269,10 +268,6 @@ export function postProcessMelody(
   });
 
   processed = dedupeIdentical(processed);
-
-  if (allowOverlap) {
-    processed = applyLegatoOverlap(processed, articulation === "pluck" ? 0.04 : 0.1);
-  }
 
   processed = shapeArticulation(processed, articulation);
 

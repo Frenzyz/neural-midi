@@ -1,5 +1,6 @@
 import { SCALE_INTERVALS, NOTE_TO_PC } from "../ml/melody-engine.js";
 import type { SequenceState } from "../ml/sequence.js";
+import { NM_BRAND_SVG } from "./brand-logo.js";
 import { NM_LOGO_SVG } from "./nm-logo.js";
 import { WIZARD_CSS } from "./wizard-theme.js";
 
@@ -57,6 +58,8 @@ export function buildSequenceEditorHtml(state: SequenceState): string {
   const scaleJson = JSON.stringify(SCALE_INTERVALS).replace(/</g, "\\u003c");
   const notePcJson = JSON.stringify(NOTE_TO_PC).replace(/</g, "\\u003c");
   const beatsPerBar = state.timeSignature.numerator || 4;
+  const tempoBpm = Math.round(state.tempo || 120);
+  const timeSigLabel = `${beatsPerBar}/${state.timeSignature.denominator || 4}`;
   const labels = state.chordLabels?.length
     ? state.chordLabels
     : Array.from({ length: state.bars }, () => "—");
@@ -647,6 +650,10 @@ document.addEventListener("DOMContentLoaded", () => {
 </head>
 <body>
   <div class="wiz-top">
+    <div class="wiz-brand" title="Neural Midi">
+      ${NM_BRAND_SVG}
+      <span class="wiz-brand-label">Neural Midi</span>
+    </div>
     <div class="wiz-params">
       <div class="wiz-row"><span class="wiz-label">GENRE</span>
         <select class="wiz-select" id="genre">${options(GENRES, state.genre)}</select></div>
@@ -671,6 +678,7 @@ document.addEventListener("DOMContentLoaded", () => {
       <button class="gen-logo" id="generate" type="button" title="Generate new melody">${NM_LOGO_SVG}</button>
     </div>
     <div class="wiz-meta">
+      <div style="font-size:11px;color:#a9a5bc;margin-bottom:6px">${tempoBpm} BPM · ${timeSigLabel}</div>
       <div>Expression <span id="exprVal">${(state.expression ?? 0.3).toFixed(2)}</span></div>
       <input type="range" id="expression" min="0" max="1" step="0.05" value="${state.expression ?? 0.3}" style="width:120px" />
       <div style="margin-top:4px">Temp <span id="tempVal">${state.temperature.toFixed(2)}</span></div>

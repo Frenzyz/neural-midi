@@ -18,6 +18,10 @@ export interface ExpressionKnobs {
   ghostNoteChance: number;
   /** Sampling temperature blend for ONNX. */
   sampleTemperature: number;
+  /** Max simultaneous notes per 16th grid slot after overlap resolve. */
+  maxPolyphonyPerSlot: number;
+  /** Max distinct 16th slots filled per bar (style cap). */
+  maxSixteenthsPerBar: number;
 }
 
 const DEFAULT_EXPRESSION = 0.5;
@@ -35,21 +39,29 @@ export function resolveExpression(params: GenerationParams): ExpressionKnobs {
   let harmonyDensity = 0.25 + expression * 0.35;
   let hybridAccompaniment = false;
   let ghostNoteChance = 0;
+  let maxPolyphonyPerSlot = 2;
+  let maxSixteenthsPerBar = 12;
 
   switch (style) {
     case "clean":
       restResampleProb = 0.28 + (1 - expression) * 0.22;
       repeatPitchPenalty = 2.5 + expression;
       harmonyDensity = 0.15 + expression * 0.15;
+      maxPolyphonyPerSlot = 2;
+      maxSixteenthsPerBar = 8;
       break;
     case "dense":
       restResampleProb = 0.02 + expression * 0.08;
       repeatPitchPenalty = 0.8 + expression * 0.6;
-      harmonyDensity = 0.5 + expression * 0.35;
+      harmonyDensity = Math.min(0.45, 0.28 + expression * 0.22);
       hybridAccompaniment = true;
+      maxPolyphonyPerSlot = 4;
+      maxSixteenthsPerBar = 16;
       break;
     case "expressive":
     default:
+      maxPolyphonyPerSlot = 2;
+      maxSixteenthsPerBar = 12;
       break;
   }
 
@@ -62,5 +74,7 @@ export function resolveExpression(params: GenerationParams): ExpressionKnobs {
     hybridAccompaniment,
     ghostNoteChance,
     sampleTemperature: temperature * (0.85 + expression * 0.3),
+    maxPolyphonyPerSlot,
+    maxSixteenthsPerBar,
   };
 }
