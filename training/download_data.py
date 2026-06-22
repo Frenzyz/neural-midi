@@ -26,6 +26,8 @@ from pathlib import Path
 import requests
 from tqdm import tqdm
 
+from genre_map import genre_for_source
+
 MAESTRO_ZIP_URL = (
     "https://storage.googleapis.com/magentadata/datasets/maestro/v3.0.0/"
     "maestro-v3.0.0-midi.zip"
@@ -197,13 +199,17 @@ def fetch_egmd(raw_dir: Path, midi_dir: Path, max_files: int) -> int:
 
 def write_manifest(midi_dir: Path, data_dir: Path) -> None:
     manifest = data_dir / "manifest.csv"
+    genre_counts: dict[str, int] = {}
     with open(manifest, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["midi_path", "source"])
+        writer.writerow(["midi_path", "source", "genre"])
         for path in sorted(midi_dir.glob("*.mid*")):
             source = path.name.split("_", 1)[0]
-            writer.writerow([str(path), source])
+            genre = genre_for_source(source)
+            genre_counts[genre] = genre_counts.get(genre, 0) + 1
+            writer.writerow([str(path), source, genre])
     print(f"Manifest: {manifest} ({len(list(midi_dir.glob('*.mid*')))} files)")
+    print("Genre file counts:", dict(sorted(genre_counts.items())))
 
 
 def main() -> None:

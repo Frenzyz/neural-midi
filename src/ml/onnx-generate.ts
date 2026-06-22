@@ -14,6 +14,7 @@ import { runMelodyStep, getHiddenStateSize, getOnnxModelVersion, isOnnxReady } f
 import {
   chordQualityOneHot,
   chordRootOneHot,
+  genreOneHot,
   positionIndex,
   REST_TOKEN,
   VOCAB_SIZE,
@@ -121,6 +122,7 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
   const steps = Math.ceil(totalBeats / grid);
   const mode = params.generationMode ?? (progression.length ? "hybrid" : "melody");
   const occupiedSlots = new Set<number>();
+  const genreVec = genreOneHot(params.genre);
 
   let prevToken = REST_TOKEN;
   let hidden = new Float32Array(getHiddenStateSize());
@@ -142,6 +144,7 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
       chordQualityOneHot(chord),
       Math.trunc(pos),
       float32Vector(hidden),
+      genreVec,
     );
     hidden = Float32Array.from(hOut);
 

@@ -1,5 +1,19 @@
-import type { ChordEvent, ChordQuality, MidiNote } from "./types.js";
+import type { ChordEvent, ChordQuality, Genre, MidiNote } from "./types.js";
 import { QUALITY_TO_INDEX } from "./types.js";
+
+/** Keep in sync with training/genre_map.py */
+export const GENRE_IDS = [
+  "pop",
+  "trap",
+  "house",
+  "lofi",
+  "edm",
+  "rnb",
+  "drill",
+  "ambient",
+] as const satisfies readonly Genre[];
+
+export const GENRE_COUNT = GENRE_IDS.length;
 
 /** REST / start token */
 export const REST_TOKEN = 12;
@@ -24,6 +38,13 @@ export function chordRootOneHot(chord: ChordEvent | undefined): Float32Array {
 export function chordQualityOneHot(chord: ChordEvent | undefined): Float32Array {
   const v = new Float32Array(6);
   if (chord) v[QUALITY_TO_INDEX[chord.quality]] = 1;
+  return v;
+}
+
+export function genreOneHot(genre: Genre): Float32Array {
+  const v = new Float32Array(GENRE_COUNT);
+  const idx = GENRE_IDS.indexOf(genre);
+  v[idx >= 0 ? idx : 0] = 1;
   return v;
 }
 

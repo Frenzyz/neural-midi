@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { chordRootOneHot, notesToTokenSequence, pitchToToken, REST_TOKEN } from "./tokenizer.js";
+import {
+  chordRootOneHot,
+  GENRE_COUNT,
+  GENRE_IDS,
+  genreOneHot,
+  notesToTokenSequence,
+  pitchToToken,
+  REST_TOKEN,
+} from "./tokenizer.js";
 import type { ChordEvent } from "./types.js";
 
 describe("tokenizer", () => {
@@ -27,5 +35,14 @@ describe("tokenizer", () => {
     const v = chordRootOneHot(chord);
     expect(v[5]).toBe(1);
     expect(v[0]).toBe(0);
+  });
+
+  it("one-hot encodes genre for v5 conditioning", () => {
+    expect(GENRE_IDS).toHaveLength(GENRE_COUNT);
+    const trap = genreOneHot("trap");
+    expect(trap[GENRE_IDS.indexOf("trap")]).toBe(1);
+    expect(trap.reduce((s, v) => s + v, 0)).toBe(1);
+    const fallback = genreOneHot("pop");
+    expect(fallback[0]).toBe(1);
   });
 });

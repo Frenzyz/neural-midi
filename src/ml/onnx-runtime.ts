@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { createFloat32Tensor, createInt64ScalarTensor, float32Vector } from "./onnx-tensors.js";
 
 export const MODEL_FILENAMES = [
+  "melody-v5.onnx",
   "melody-v4.onnx",
   "melody-v3.onnx",
   "melody-v2.onnx",
@@ -12,6 +13,7 @@ export const MODEL_FILENAMES = [
 
 let hiddenSize = 128;
 let gruLayers = 1;
+let genreConditioning = false;
 
 type OrtModule = typeof import("onnxruntime-node");
 type InferenceSession = import("onnxruntime-node").InferenceSession;
@@ -22,7 +24,8 @@ let modelPath: string | null = null;
 let loadPromise: Promise<boolean> | null = null;
 
 function configureForModel(resolved: string): void {
-  if (resolved.includes("melody-v4") || resolved.includes("melody-v3")) {
+  genreConditioning = resolved.includes("melody-v5");
+  if (resolved.includes("melody-v5") || resolved.includes("melody-v4") || resolved.includes("melody-v3")) {
     hiddenSize = 320;
     gruLayers = 2;
   } else if (resolved.includes("melody-v2")) {
@@ -43,9 +46,18 @@ export function getHiddenTensorDims(): [number, number, number] {
 }
 
 export function getOnnxModelVersion(): string {
+  if (resolvedIncludesV5()) return "onnx-v5.0";
   if (resolvedIncludesV4()) return "onnx-v4.0";
   if (hiddenSize >= 320) return "onnx-v3.0";
   return gruLayers > 1 ? "onnx-v2.0" : "onnx-v1.0";
+}
+
+export function hasGenreConditioning(): boolean {
+  return genreConditioning;
+}
+
+function resolvedIncludesV5(): boolean {
+  return modelPath?.includes("melody-v5") ?? false;
 }
 
 function resolvedIncludesV4(): boolean {
@@ -148,6 +160,7 @@ export async function runMelodyStep(
   chordQuality: Float32Array,
   position: number,
   hidden: Float32Array,
+  genre?: Float32Array,
 ): Promise<StepResult> {
   if (!session || !ortModule) {
     throw new Error("ONNX session not loaded");
@@ -161,6 +174,13 @@ export async function runMelodyStep(
     position: createInt64ScalarTensor(ortModule.Tensor, position),
     h_in: createFloat32Tensor(ortModule.Tensor, hidden, [layers, 1, size]),
   };
+
+  if (genreConditioning) {
+    if (!genre) {
+      throw new Error("Genre one-hot required for melody-v5 model");
+    }
+    feeds.genre = createFloat32Tensor(ortModule.Tensor, genre, [1, genre.length]);
+  }
 
   const out = await session.run(feeds);
   const logits = float32Vector(out.logits!.data as ArrayLike<number>);
