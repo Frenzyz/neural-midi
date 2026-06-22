@@ -1,7 +1,7 @@
 import type { ChordEvent, GenerationParams, MidiNote, Scale } from "./types.js";
 import { chordAtBeat } from "./chords.js";
 import { genreEntry } from "./genre-library.js";
-import { addGhostNotes, applySwing, applyVelocityHumanize } from "./humanize.js";
+import { addGhostNotes, addHarmonicFillers, applySwing, applyVelocityHumanize } from "./humanize.js";
 import { applyLegatoOverlap, mergeVoices } from "./pattern-engine.js";
 import { mulberry32 } from "./melody-engine.js";
 import {
@@ -135,6 +135,7 @@ export function postProcessMelody(
     processed = applySwing(processed, profile.swing, beatsPerBar);
     processed = applyVelocityHumanize(processed, rng, profile.velocityAccent);
     processed = addGhostNotes(processed, scalePitches, rng, profile.ghostNoteChance);
+    processed = addHarmonicFillers(processed, progression, beatsPerBar, rng, 0.32);
   }
 
   if (processed.length > 1 && mode === "melody") {

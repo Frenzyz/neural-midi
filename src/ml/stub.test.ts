@@ -29,7 +29,7 @@ describe("generateStubMelody", () => {
 
   it("returns notes in key and ends on tonic", () => {
     const result = generateStubMelody(baseParams);
-    expect(result.notes.length).toBeGreaterThan(3);
+    expect(result.notes.length).toBeGreaterThan(8);
 
     for (const note of result.notes) {
       expect(isInScale(note.pitch, "C", "major")).toBe(true);
@@ -82,7 +82,7 @@ describe("generateStubMelody", () => {
         i !== j && Math.abs(a.startTime - b.startTime) < 0.01,
       ),
     );
-    expect(result.notes.length).toBeGreaterThan(4);
+    expect(result.notes.length).toBeGreaterThan(10);
     expect(hasOverlap || atZero.length >= 1).toBe(true);
   });
 });

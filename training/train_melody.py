@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Train chord-conditioned melody step model on MAESTRO and export ONNX.
+"""Train chord-conditioned melody step model and export ONNX (v3 polyphonic).
 
 Pipeline:
-  1. python training/download_data.py --max-files 200
-  2. python training/train_melody.py --epochs 8
+  python training/download_data.py --datasets maestro,pop909,jsb --max-per-dataset 2000
+  python training/train_melody.py --epochs 16 --max-files 8000 --out models/melody-v3.onnx
 """
 
 from __future__ import annotations
@@ -21,7 +21,8 @@ from tqdm import tqdm
 
 VOCAB = 13  # 12 pitch classes + REST
 REST = 12
-HIDDEN = 256
+HIDDEN = 320
+EMBED = 64
 POSITIONS = 16
 GRID = 0.25
 
@@ -52,63 +53,66 @@ def detect_chord(pcs: list[int]) -> tuple[int, int] | None:
     return None
 
 
-def extract_melody_and_chords(pm: pretty_midi.PrettyMIDI, max_beats: float = 16.0):
-    """Highest-note monophonic reduction + per-bar chord labels."""
+def voices_at_time(notes: list, t: float) -> list[int]:
+    active = sorted(
+        [n for n in notes if n.start <= t < n.end],
+        key=lambda n: -n.pitch,
+    )
+    tokens: list[int] = []
+    for n in active[:3]:
+        tokens.append(n.pitch % 12)
+    return tokens
+
+
+def extract_polyphonic_pairs(pm: pretty_midi.PrettyMIDI, max_beats: float = 16.0):
+    """Melody + 2nd/3rd voice token streams for denser harmonic training."""
     if not pm.instruments:
-        return [], []
+        return []
 
     notes = sorted(
         (n for inst in pm.instruments for n in inst.notes if not inst.is_drum),
         key=lambda n: (n.start, -n.pitch),
     )
     if not notes:
-        return [], []
+        return []
 
     end = min(max_beats, pm.get_end_time())
     steps = int(end / GRID) + 1
+    beats_per_bar = 4.0
 
-    melody_tokens: list[int] = []
+    streams: list[list[int]] = [[], [], []]
     chord_roots: list[int] = []
     chord_quals: list[int] = []
     positions: list[int] = []
-
-    beats_per_bar = 4.0
 
     for step in range(steps):
         t = step * GRID
         bar = int(t // beats_per_bar)
         beat_in_bar = t % beats_per_bar
+        voices = voices_at_time(notes, t)
+        while len(voices) < 3:
+            voices.append(REST)
 
-        active = [n for n in notes if n.start <= t < n.end]
-        if active:
-            top = max(active, key=lambda n: n.pitch)
-            token = top.pitch % 12
-        else:
-            token = REST
+        for si in range(3):
+            streams[si].append(voices[si] if voices[si] != REST else REST)
 
         bar_start = bar * beats_per_bar
         bar_notes = [n for n in notes if n.start < bar_start + beats_per_bar and n.end > bar_start]
         pcs = sorted({n.pitch % 12 for n in bar_notes})
         chord = detect_chord(pcs)
         root, qual = chord if chord else (0, 0)
-
-        melody_tokens.append(token)
         chord_roots.append(root)
         chord_quals.append(qual)
         positions.append(min(POSITIONS - 1, int((beat_in_bar / beats_per_bar) * POSITIONS)))
 
-    pairs = []
-    for i in range(1, len(melody_tokens)):
-        pairs.append(
-            (
-                melody_tokens[i - 1],
-                melody_tokens[i],
-                chord_roots[i],
-                chord_quals[i],
-                positions[i],
-            )
-        )
-    return pairs, melody_tokens
+    pairs: list[tuple[int, int, int, int, int]] = []
+    for stream in streams:
+        for i in range(1, len(stream)):
+            prev_t, next_t = stream[i - 1], stream[i]
+            if prev_t == REST and next_t == REST:
+                continue
+            pairs.append((prev_t, next_t, chord_roots[i], chord_quals[i], positions[i]))
+    return pairs
 
 
 class MelodyDataset(Dataset):
@@ -118,7 +122,7 @@ class MelodyDataset(Dataset):
         for path in tqdm(paths, desc="Parsing MIDI"):
             try:
                 pm = pretty_midi.PrettyMIDI(str(path))
-                pairs, _ = extract_melody_and_chords(pm)
+                pairs = extract_polyphonic_pairs(pm)
                 self.samples.extend(pairs)
             except Exception:
                 continue
@@ -144,14 +148,13 @@ class MelodyDataset(Dataset):
 class MelodyStepModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.token_embed = nn.Embedding(VOCAB, 48)
-        self.pos_embed = nn.Embedding(POSITIONS, 48)
-        self.chord_proj = nn.Linear(18, 48)
-        self.gru = nn.GRU(48, HIDDEN, num_layers=2, batch_first=True, dropout=0.1)
+        self.token_embed = nn.Embedding(VOCAB, EMBED)
+        self.pos_embed = nn.Embedding(POSITIONS, EMBED)
+        self.chord_proj = nn.Linear(18, EMBED)
+        self.gru = nn.GRU(EMBED, HIDDEN, num_layers=2, batch_first=True, dropout=0.1)
         self.head = nn.Linear(HIDDEN, VOCAB)
 
     def forward(self, prev_token, chord_root, chord_quality, position, h_in):
-        # Shapes: [B,1], [B,12], [B,6], [B,1], [B,1,H]
         tok = self.token_embed(prev_token)
         pos = self.pos_embed(position)
         chord = self.chord_proj(torch.cat([chord_root, chord_quality], dim=-1)).unsqueeze(1)
@@ -183,9 +186,9 @@ def export_onnx(model: MelodyStepModel, out_path: Path) -> None:
             "chord_root": {0: "batch"},
             "chord_quality": {0: "batch"},
             "position": {0: "batch"},
-            "h_in": {0: "batch"},
+            "h_in": {1: "batch"},
             "logits": {0: "batch"},
-            "h_out": {0: "batch"},
+            "h_out": {1: "batch"},
         },
         opset_version=17,
     )
@@ -195,18 +198,16 @@ def export_onnx(model: MelodyStepModel, out_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=Path, default=Path("training/data/midi"))
-    parser.add_argument("--out", type=Path, default=Path("models/melody-v2.onnx"))
-    parser.add_argument("--epochs", type=int, default=12)
+    parser.add_argument("--out", type=Path, default=Path("models/melody-v3.onnx"))
+    parser.add_argument("--epochs", type=int, default=16)
     parser.add_argument("--batch-size", type=int, default=512)
-    parser.add_argument("--max-files", type=int, default=5000)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--max-files", type=int, default=8000)
+    parser.add_argument("--lr", type=float, default=8e-4)
     args = parser.parse_args()
 
     midi_paths = sorted(args.data_dir.glob("*.mid*"))
     if not midi_paths:
-        raise SystemExit(
-            f"No MIDI in {args.data_dir}. Run: python training/download_data.py"
-        )
+        raise SystemExit(f"No MIDI in {args.data_dir}. Run: python training/download_data.py")
 
     random.shuffle(midi_paths)
     dataset = MelodyDataset(midi_paths, max_files=args.max_files)
@@ -231,7 +232,10 @@ def main() -> None:
             opt.step()
             total_loss += loss.item()
             count += 1
-        print(f"epoch {epoch + 1}/{args.epochs} loss={total_loss / max(count, 1):.4f} samples={len(dataset)}")
+        print(
+            f"epoch {epoch + 1}/{args.epochs} loss={total_loss / max(count, 1):.4f} "
+            f"samples={len(dataset)}"
+        )
 
     export_onnx(model, args.out)
 

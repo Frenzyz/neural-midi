@@ -21,7 +21,7 @@ export const GENRE_LIBRARY: Record<Genre, GenreLibraryEntry> = {
   pop: {
     progressionDegrees: [0, 5, 3, 4],
     swing: 0.08,
-    ghostNoteChance: 0.12,
+    ghostNoteChance: 0.18,
     velocityAccent: 14,
     motifs: [
       {
@@ -49,7 +49,7 @@ export const GENRE_LIBRARY: Record<Genre, GenreLibraryEntry> = {
   trap: {
     progressionDegrees: [0, 5, 3, 5],
     swing: 0.14,
-    ghostNoteChance: 0.18,
+    ghostNoteChance: 0.24,
     velocityAccent: 10,
     motifs: [
       {
@@ -67,7 +67,7 @@ export const GENRE_LIBRARY: Record<Genre, GenreLibraryEntry> = {
   house: {
     progressionDegrees: [0, 0, 5, 5],
     swing: 0.06,
-    ghostNoteChance: 0.1,
+    ghostNoteChance: 0.16,
     velocityAccent: 12,
     motifs: [
       {
@@ -85,7 +85,7 @@ export const GENRE_LIBRARY: Record<Genre, GenreLibraryEntry> = {
   lofi: {
     progressionDegrees: [0, 3, 4, 0],
     swing: 0.18,
-    ghostNoteChance: 0.22,
+    ghostNoteChance: 0.28,
     velocityAccent: 8,
     motifs: [
       {
@@ -102,7 +102,7 @@ export const GENRE_LIBRARY: Record<Genre, GenreLibraryEntry> = {
   edm: {
     progressionDegrees: [0, 5, 3, 4],
     swing: 0.05,
-    ghostNoteChance: 0.08,
+    ghostNoteChance: 0.14,
     velocityAccent: 16,
     motifs: [
       {
@@ -120,7 +120,7 @@ export const GENRE_LIBRARY: Record<Genre, GenreLibraryEntry> = {
   rnb: {
     progressionDegrees: [0, 4, 5, 3],
     swing: 0.12,
-    ghostNoteChance: 0.15,
+    ghostNoteChance: 0.22,
     velocityAccent: 11,
     motifs: [
       {
@@ -138,7 +138,7 @@ export const GENRE_LIBRARY: Record<Genre, GenreLibraryEntry> = {
   drill: {
     progressionDegrees: [0, 3, 5, 4],
     swing: 0.16,
-    ghostNoteChance: 0.2,
+    ghostNoteChance: 0.26,
     velocityAccent: 9,
     motifs: [
       {
@@ -156,7 +156,7 @@ export const GENRE_LIBRARY: Record<Genre, GenreLibraryEntry> = {
   ambient: {
     progressionDegrees: [0, 2, 4, 5],
     swing: 0.04,
-    ghostNoteChance: 0.06,
+    ghostNoteChance: 0.12,
     velocityAccent: 6,
     motifs: [
       {

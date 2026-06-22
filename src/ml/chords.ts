@@ -2,6 +2,32 @@ import type { ChordEvent, ChordQuality, Genre, MidiNote, Scale } from "./types.j
 import { QUALITY_TO_INDEX } from "./types.js";
 import { NOTE_TO_PC, SCALE_INTERVALS } from "./melody-engine.js";
 import { genreEntry } from "./genre-library.js";
+import { quantizeBeat } from "./melody-engine.js";
+
+const GRID = 0.25;
+
+function arpeggiateBarLocal(
+  chord: ChordEvent,
+  barStart: number,
+  beatsPerBar: number,
+  rng: () => number,
+  steps: number,
+): MidiNote[] {
+  const pcs = chord.pitchClasses.length > 0 ? chord.pitchClasses : [chord.rootPc];
+  const notes: MidiNote[] = [];
+  const stepLen = beatsPerBar / steps;
+  for (let i = 0; i < steps; i++) {
+    if (rng() < 0.08) continue;
+    const pc = pcs[i % pcs.length]!;
+    notes.push({
+      pitch: 60 + pc + (i % 2) * 12,
+      startTime: quantizeBeat(barStart + i * stepLen, GRID),
+      duration: Math.max(GRID, stepLen * 0.9),
+      velocity: 64 + (i % 2 === 0 ? 10 : 0),
+    });
+  }
+  return notes;
+}
 
 const CHORD_TEMPLATES: { quality: ChordQuality; intervals: number[] }[] = [
   { quality: "major", intervals: [0, 4, 7] },
@@ -146,10 +172,21 @@ export function nearestChordTonePitch(
   return best;
 }
 
-/** Close-position voicing around `centerMidi` (default 60). */
-export function chordVoicingPitches(chord: ChordEvent, centerMidi = 60): number[] {
+/** Close-position voicing with optional 7th/9th color. */
+export function chordVoicingPitches(
+  chord: ChordEvent,
+  centerMidi = 60,
+  rich = false,
+): number[] {
   const root = chord.rootPc;
-  const pcs = chord.pitchClasses.length > 0 ? chord.pitchClasses : [root, (root + 4) % 12, (root + 7) % 12];
+  let pcs = chord.pitchClasses.length > 0 ? [...chord.pitchClasses] : [root, (root + 4) % 12, (root + 7) % 12];
+  if (rich) {
+    if (chord.quality === "dom7" || chord.quality === "min7") {
+      if (!pcs.includes((root + 10) % 12)) pcs.push((root + 10) % 12);
+    } else if (chord.quality === "major" && !pcs.includes((root + 2) % 12)) {
+      pcs.push((root + 2) % 12);
+    }
+  }
   const baseOct = Math.floor(centerMidi / 12);
   const voicing: number[] = [];
 
@@ -160,6 +197,31 @@ export function chordVoicingPitches(chord: ChordEvent, centerMidi = 60): number[
     voicing.push(pitch);
   }
   return [...new Set(voicing)].sort((a, b) => a - b);
+}
+
+/** Voice-lead from previous voicing to minimize movement. */
+export function voiceLeadVoicing(
+  chord: ChordEvent,
+  prevPitches: number[],
+  centerMidi = 58,
+): number[] {
+  const candidates: number[][] = [];
+  for (let shift = -12; shift <= 12; shift += 12) {
+    candidates.push(chordVoicingPitches(chord, centerMidi + shift, true));
+  }
+  if (!prevPitches.length) return candidates[0] ?? chordVoicingPitches(chord, centerMidi, true);
+  const prevCenter = prevPitches.reduce((a, b) => a + b, 0) / prevPitches.length;
+  let best = candidates[0]!;
+  let bestCost = Infinity;
+  for (const cand of candidates) {
+    const center = cand.reduce((a, b) => a + b, 0) / cand.length;
+    const cost = Math.abs(center - prevCenter);
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = cand;
+    }
+  }
+  return best;
 }
 
 export interface ChordVoicingOptions {
@@ -175,20 +237,22 @@ export function generateChordVoicings(options: ChordVoicingOptions): MidiNote[] 
   const { beatsPerBar, bars, progression, articulation = "lead" } = options;
   const rng = options.rng ?? (() => 0.5);
   const notes: MidiNote[] = [];
+  let prevVoicing: number[] = [];
 
   for (let bar = 0; bar < bars; bar++) {
     const barStart = bar * beatsPerBar;
     const chord = chordAtBeat(progression, barStart);
     if (!chord) continue;
 
-    const voicing = chordVoicingPitches(chord, 58 + (bar % 2) * 2);
+    const voicing = voiceLeadVoicing(chord, prevVoicing, 58 + (bar % 2) * 2);
+    prevVoicing = voicing;
     const pluck = articulation === "pluck";
-    const hits = pluck ? [0, 2] : [0];
+    const hits = pluck ? [0, 1, 2, 3] : [0, 2];
 
     for (const hit of hits) {
       const startTime = barStart + hit;
-      const duration = pluck ? 0.35 : beatsPerBar - hit * 0.02;
-      const velocity = hit === 0 ? 82 : 72;
+      const duration = pluck ? 0.35 : beatsPerBar / hits.length - 0.02;
+      const velocity = hit === 0 ? 84 : 72;
 
       for (const pitch of voicing) {
         notes.push({
@@ -204,7 +268,45 @@ export function generateChordVoicings(options: ChordVoicingOptions): MidiNote[] 
   return notes;
 }
 
-/** Chord stabs on strong beats for Hybrid mode (merged under melody). */
+/** Full hybrid accompaniment: voicings + rhythmic hits + arpeggios. */
+export function generateHybridAccompaniment(
+  progression: ChordEvent[],
+  beatsPerBar: number,
+  bars: number,
+  articulation: "lead" | "pluck" = "lead",
+  rng: () => number = () => 0.5,
+): MidiNote[] {
+  const notes: MidiNote[] = [];
+  let prevVoicing: number[] = [];
+
+  for (let bar = 0; bar < bars; bar++) {
+    const barStart = bar * beatsPerBar;
+    const chord = chordAtBeat(progression, barStart);
+    if (!chord) continue;
+
+    const voicing = voiceLeadVoicing(chord, prevVoicing, 52);
+    prevVoicing = voicing;
+
+    const hitTimes = articulation === "pluck" ? [0, 1, 2, 3] : [0, 1.5, 2.5];
+    for (const t of hitTimes) {
+      for (const pitch of voicing) {
+        notes.push({
+          pitch,
+          startTime: barStart + t,
+          duration: articulation === "pluck" ? 0.28 : 0.55,
+          velocity: t === 0 ? 74 : 62,
+        });
+      }
+    }
+
+    if (rng() < 0.75) {
+      notes.push(...arpeggiateBarLocal(chord, barStart, beatsPerBar, rng, articulation === "pluck" ? 8 : 4));
+    }
+  }
+  return notes;
+}
+
+/** @deprecated use generateHybridAccompaniment */
 export function generateHybridChordStabs(
   progression: ChordEvent[],
   beatsPerBar: number,

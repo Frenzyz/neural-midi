@@ -1,4 +1,5 @@
-import type { MidiNote } from "./types.js";
+import type { ChordEvent, MidiNote } from "./types.js";
+import { chordAtBeat } from "./chords.js";
 import { quantizeBeat } from "./melody-engine.js";
 import { GRID } from "./pattern-engine.js";
 
@@ -69,4 +70,29 @@ export function addGhostNotes(
   }
 
   return [...notes, ...ghosts].sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
+}
+
+/** Light passing chord tones between strong beats. */
+export function addHarmonicFillers(
+  notes: MidiNote[],
+  progression: ChordEvent[],
+  beatsPerBar: number,
+  rng: () => number,
+  chance = 0.35,
+): MidiNote[] {
+  const fillers: MidiNote[] = [];
+  for (const n of notes) {
+    if (rng() > chance) continue;
+    const chord = chordAtBeat(progression, n.startTime);
+    if (!chord) continue;
+    const fillerTime = quantizeBeat(n.startTime + n.duration * 0.5, GRID);
+    const pc = chord.pitchClasses[Math.floor(rng() * chord.pitchClasses.length)]!;
+    fillers.push({
+      pitch: 60 + pc,
+      startTime: fillerTime,
+      duration: GRID,
+      velocity: Math.max(32, Math.round(n.velocity * 0.5)),
+    });
+  }
+  return [...notes, ...fillers].sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
 }

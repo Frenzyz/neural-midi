@@ -1,6 +1,6 @@
 import { float32Vector } from "./onnx-tensors.js";
 import { chordAtBeat } from "./chords.js";
-import { addHarmonyLayer, applyLegatoOverlap, mergeVoices } from "./pattern-engine.js";
+import { addHarmonyLayer, addHarmonicStacks, applyLegatoOverlap, mergeVoices } from "./pattern-engine.js";
 import { mulberry32, quantizeBeat } from "./melody-engine.js";
 import { runMelodyStep, getHiddenStateSize, getOnnxModelVersion, isOnnxReady } from "./onnx-runtime.js";
 import {
@@ -75,9 +75,15 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
     const token = sampleToken(logits, temperature, rng);
     prevToken = token;
 
-    if (token === REST_TOKEN) continue;
+    let pitchToken = token;
+    if (pitchToken === REST_TOKEN && rng() < 0.42) {
+      pitchToken = sampleToken(logits, Math.max(0.15, temperature * 0.85), rng);
+      prevToken = pitchToken;
+    }
 
-    let pitch = tokenToMidiPitch(token, octave);
+    if (pitchToken === REST_TOKEN) continue;
+
+    let pitch = tokenToMidiPitch(pitchToken, octave);
 
     if (Math.abs(pitch - lastPitch) > 7) {
       octave += pitch > lastPitch ? 1 : -1;
@@ -97,7 +103,7 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
     notes.push({
       pitch,
       startTime: quantizeBeat(beat),
-      duration: grid * 1.25,
+      duration: grid * 1.5,
       velocity: 72 + Math.floor(rng() * 30),
     });
     lastPitch = pitch;
@@ -120,10 +126,11 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
     for (const n of deduped) {
       const chord = chordAtBeat(progression, n.startTime);
       if (!chord) continue;
-      const extra = addHarmonyLayer([n], chord.pitchClasses, rng, mode === "hybrid" ? 0.4 : 0.55);
+      const extra = addHarmonyLayer([n], chord.pitchClasses, rng, mode === "hybrid" ? 0.65 : 0.78);
       if (extra.length > 1) extraLayers.push(extra.slice(1));
     }
     enriched = mergeVoices(enriched, ...extraLayers);
+    enriched = addHarmonicStacks(enriched, progression, rng, 0.75);
   }
 
   return {

@@ -1,5 +1,6 @@
-import type { MidiNote } from "./types.js";
+import type { ChordEvent, MidiNote } from "./types.js";
 import type { MotifFragment } from "./genre-library.js";
+import { chordAtBeat } from "./chords.js";
 import { quantizeBeat } from "./melody-engine.js";
 
 export const GRID = 0.25;
@@ -58,7 +59,7 @@ export function motifFromFragment(
   const motif: MotifEvent[] = [];
   let deg = 0;
   for (const slot of fragment.slots) {
-    if (rng() < 0.08) continue;
+    if (rng() < 0.03) continue;
     motif.push({
       offset: slot.beatInMotif,
       degree: fragment.degrees[deg % fragment.degrees.length]!,
@@ -70,7 +71,7 @@ export function motifFromFragment(
   }
   for (const slot of fragment.slots) {
     if (slot.beatInMotif >= beatsPerBar) continue;
-    if (rng() < 0.12) continue;
+    if (rng() < 0.05) continue;
     motif.push({
       offset: slot.beatInMotif + beatsPerBar,
       degree: fragment.degrees[deg % fragment.degrees.length]!,
@@ -182,6 +183,65 @@ export function addHarmonyLayer(
     });
   }
   return [...melody, ...extras];
+}
+
+/** Add 3rds/6ths double-stops and chord-tone stacks on melody notes. */
+export function addHarmonicStacks(
+  melody: MidiNote[],
+  progression: ChordEvent[],
+  rng: () => number,
+  density = 0.7,
+): MidiNote[] {
+  const extras: MidiNote[] = [];
+  for (const note of melody) {
+    const chord = chordAtBeat(progression, note.startTime);
+    if (!chord || rng() > density) continue;
+    const pcs = chord.pitchClasses;
+    const third = pcs[1] ?? pcs[0];
+    const sixth = pcs[Math.min(2, pcs.length - 1)] ?? third;
+    const octave = Math.floor(note.pitch / 12);
+    const intervals = [
+      { pc: third, vel: 0.68 },
+      { pc: sixth, vel: 0.62 },
+    ];
+    for (const { pc, vel } of intervals) {
+      let p = octave * 12 + (pc! % 12);
+      if (Math.abs(p - note.pitch) < 2) p += 3;
+      if (p === note.pitch) continue;
+      extras.push({
+        pitch: p,
+        startTime: note.startTime,
+        duration: note.duration * 0.95,
+        velocity: Math.max(42, Math.round(note.velocity * vel)),
+      });
+    }
+  }
+  return mergeVoices(melody, extras);
+}
+
+/** Arpeggiated chord tones across a bar (8th-note pattern). */
+export function arpeggiateChordBar(
+  chord: ChordEvent,
+  barStart: number,
+  beatsPerBar: number,
+  rng: () => number,
+  steps = 8,
+): MidiNote[] {
+  const pcs = chord.pitchClasses.length > 0 ? chord.pitchClasses : [chord.rootPc];
+  const notes: MidiNote[] = [];
+  const stepLen = beatsPerBar / steps;
+  for (let i = 0; i < steps; i++) {
+    if (rng() < 0.08) continue;
+    const pc = pcs[i % pcs.length]!;
+    const pitch = 60 + pc + (i % 2) * 12;
+    notes.push({
+      pitch,
+      startTime: quantizeBeat(barStart + i * stepLen, GRID),
+      duration: Math.max(GRID, stepLen * 0.9),
+      velocity: 64 + (i % 2 === 0 ? 10 : 0),
+    });
+  }
+  return notes;
 }
 
 /** Legato overlap: extend note durations into the next attack. */

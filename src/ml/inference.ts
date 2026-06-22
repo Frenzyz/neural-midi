@@ -4,9 +4,12 @@ import { findModelPath, loadOnnxSession, isOnnxReady } from "./onnx-runtime.js";
 import {
   defaultDiatonicProgression,
   generateChordVoicings,
-  generateHybridChordStabs,
+  generateHybridAccompaniment,
 } from "./chords.js";
+import { boostDensityIfSparse } from "./density.js";
+import { mulberry32 } from "./melody-engine.js";
 import { postProcessHybrid, postProcessMelody } from "./post-process.js";
+import { addHarmonicStacks } from "./pattern-engine.js";
 import { generateStubMelody } from "./stub.js";
 import { resolveTimeSignature, toNumber } from "../util/coerce.js";
 
@@ -85,10 +88,23 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
     articulation,
   });
 
-  if (mode === "hybrid" && progression.length > 0) {
-    const stabs = generateHybridChordStabs(progression, beatsPerBar, bars, articulation);
-    notes = postProcessHybrid(notes, stabs, { ...params, chordProgression: progression }, articulation);
+  const rng = mulberry32(toNumber(params.seed, 1) + 31);
+  if (progression.length > 0) {
+    notes = addHarmonicStacks(notes, progression, rng, mode === "hybrid" ? 0.85 : 0.72);
   }
+
+  if (mode === "hybrid" && progression.length > 0) {
+    const accompaniment = generateHybridAccompaniment(
+      progression,
+      beatsPerBar,
+      bars,
+      articulation,
+      rng,
+    );
+    notes = postProcessHybrid(notes, accompaniment, { ...params, chordProgression: progression }, articulation);
+  }
+
+  notes = boostDensityIfSparse(notes, progression, beatsPerBar, bars, mode, toNumber(params.seed, 1));
 
   return { ...result, notes };
 }
