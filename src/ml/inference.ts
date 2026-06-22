@@ -7,6 +7,7 @@ import {
   generateHybridAccompaniment,
 } from "./chords.js";
 import { boostDensityIfSparse } from "./density.js";
+import { applyTasteFilter } from "./taste-filter.js";
 import { mulberry32 } from "./melody-engine.js";
 import { postProcessHybrid, postProcessMelody } from "./post-process.js";
 import { addHarmonicStacks } from "./pattern-engine.js";
@@ -89,8 +90,8 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
   });
 
   const rng = mulberry32(toNumber(params.seed, 1) + 31);
-  if (progression.length > 0) {
-    notes = addHarmonicStacks(notes, progression, rng, mode === "hybrid" ? 0.85 : 0.72);
+  if (progression.length > 0 && mode !== "melody") {
+    notes = addHarmonicStacks(notes, progression, rng, mode === "hybrid" ? 0.45 : 0.35);
   }
 
   if (mode === "hybrid" && progression.length > 0) {
@@ -105,6 +106,14 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
   }
 
   notes = boostDensityIfSparse(notes, progression, beatsPerBar, bars, mode, toNumber(params.seed, 1));
+
+  notes = applyTasteFilter(notes, {
+    mode,
+    beatsPerBar,
+    bars,
+    seed: toNumber(params.seed, 1),
+    genre: params.genre,
+  });
 
   return { ...result, notes };
 }

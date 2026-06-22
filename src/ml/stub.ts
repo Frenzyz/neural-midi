@@ -11,7 +11,6 @@ import {
   nearestScaleIndex,
 } from "./melody-engine.js";
 import {
-  addHarmonicStacks,
   addHarmonyLayer,
   applyLegatoOverlap,
   mergeVoices,
@@ -86,9 +85,8 @@ export function generateStubMelody(params: GenerationParams): GenerationResult {
 
   let notes = phraseFromMotifs(bars, beatsPerBar, motifA, motifB, pitches, rng);
 
-  if (mode !== "chords" && progression.length > 0) {
-    notes = enrichWithHarmony(notes, progression, rng, mode === "hybrid" ? 0.55 : 0.75);
-    notes = addHarmonicStacks(notes, progression, rng, 0.8);
+  if (mode !== "chords" && progression.length > 0 && mode === "hybrid") {
+    notes = enrichWithHarmony(notes, progression, rng, 0.35);
   }
 
   notes = applyLegatoOverlap(notes, params.articulation === "pluck" ? 0.05 : 0.1);

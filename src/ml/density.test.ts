@@ -27,8 +27,8 @@ describe("density helpers", () => {
     expect(notesPerBar(sparse, 4, 4)).toBe(0.5);
   });
 
-  it("detects sparse output below melody target", () => {
-    expect(meetsDensityTarget(sparse, 4, 4, "melody")).toBe(false);
+  it("detects sparse output below hybrid target", () => {
+    expect(meetsDensityTarget(sparse, 4, 4, "hybrid")).toBe(false);
   });
 
   it("boosts sparse output toward hybrid density", () => {

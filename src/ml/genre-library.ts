@@ -85,16 +85,24 @@ export const GENRE_LIBRARY: Record<Genre, GenreLibraryEntry> = {
   lofi: {
     progressionDegrees: [0, 3, 4, 0],
     swing: 0.18,
-    ghostNoteChance: 0.28,
+    ghostNoteChance: 0.1,
     velocityAccent: 8,
     motifs: [
       {
         name: "lazy-cascade",
         degrees: [0, 2, 1, 2, 0],
         slots: [
-          { beatInMotif: 0.25, duration: 0.5, accent: false },
-          { beatInMotif: 1.25, duration: 0.5, accent: false },
-          { beatInMotif: 2.5, duration: 0.75, accent: true },
+          { beatInMotif: 0, duration: 1.25, accent: true },
+          { beatInMotif: 2, duration: 1.0, accent: false },
+          { beatInMotif: 3.25, duration: 0.75, accent: false },
+        ],
+      },
+      {
+        name: "sparse-bloom",
+        degrees: [0, 4, 2, 0],
+        slots: [
+          { beatInMotif: 0.5, duration: 1.5, accent: true },
+          { beatInMotif: 2.5, duration: 1.0, accent: false },
         ],
       },
     ],

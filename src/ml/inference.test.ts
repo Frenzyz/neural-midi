@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateMelody, isModelLoaded } from "./inference.js";
+import { distinctDurationsInRange, maxConsecutiveSamePitch } from "./taste-filter.js";
 import type { GenerationParams } from "./types.js";
 
 const params: GenerationParams = {
@@ -47,5 +48,19 @@ describe("inference", () => {
     });
     expect(result.notes.length).toBeGreaterThanOrEqual(6);
     expect(result.notes.some((n) => n.startTime === 0)).toBe(true);
+  });
+
+  it("8-bar lofi melody avoids machine-gun repetition", async () => {
+    const result = await generateMelody({
+      ...params,
+      genre: "lofi",
+      generationMode: "melody",
+      bars: 8,
+      seed: 115022,
+      key: "D",
+    });
+    expect(result.notes.length).toBeGreaterThan(0);
+    expect(maxConsecutiveSamePitch(result.notes)).toBeLessThanOrEqual(3);
+    expect(distinctDurationsInRange(result.notes, 0, 16)).toBeGreaterThanOrEqual(2);
   });
 });

@@ -31,9 +31,9 @@ export interface DensityTarget {
 }
 
 export const DENSITY_TARGETS: Record<string, DensityTarget> = {
-  melody: { minNotesPerBar: 4, minAvgPolyphony: 1.2 },
-  hybrid: { minNotesPerBar: 8, minAvgPolyphony: 2.0 },
-  chords: { minNotesPerBar: 6, minAvgPolyphony: 2.5 },
+  melody: { minNotesPerBar: 2, minAvgPolyphony: 1.0 },
+  hybrid: { minNotesPerBar: 5, minAvgPolyphony: 1.5 },
+  chords: { minNotesPerBar: 4, minAvgPolyphony: 2.0 },
 };
 
 export function meetsDensityTarget(
@@ -58,23 +58,24 @@ export function boostDensityIfSparse(
   mode: keyof typeof DENSITY_TARGETS,
   seed: number,
 ): MidiNote[] {
+  // Melody quality is handled by taste-filter; never machine-gun-fill the lead.
+  if (mode === "melody") return notes;
   if (meetsDensityTarget(notes, beatsPerBar, bars, mode)) return notes;
   const rng = mulberry32(seed + 99);
   const extras: MidiNote[] = [];
   for (let bar = 0; bar < bars; bar++) {
     const chord = chordAtBeat(progression, bar * beatsPerBar);
     if (!chord) continue;
-    for (let hit = 0; hit < beatsPerBar; hit += 1) {
-      if (rng() > 0.55) continue;
+    for (let hit = 0; hit < beatsPerBar; hit += 2) {
+      if (rng() > 0.45) continue;
       const t = bar * beatsPerBar + hit;
-      for (const pc of chord.pitchClasses.slice(0, 3)) {
-        extras.push({
-          pitch: 60 + pc + (hit % 2) * 12,
-          startTime: quantizeBeat(t, GRID),
-          duration: 0.25,
-          velocity: 58 + Math.floor(rng() * 20),
-        });
-      }
+      const pc = chord.pitchClasses[Math.floor(rng() * chord.pitchClasses.length)]!;
+      extras.push({
+        pitch: 60 + pc + (hit % 2) * 12,
+        startTime: quantizeBeat(t, GRID),
+        duration: 0.5 + (rng() < 0.4 ? 0.5 : 0),
+        velocity: 58 + Math.floor(rng() * 16),
+      });
     }
   }
   const merged = [...notes, ...extras].sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);

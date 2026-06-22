@@ -60,7 +60,12 @@ export function addGhostNotes(
     const ghostTime = quantizeBeat(prev.startTime + prev.duration * 0.85, GRID);
     if (ghostTime >= curr.startTime) continue;
     const pitch =
-      allowedPitches[Math.floor(rng() * allowedPitches.length)] ?? prev.pitch;
+      allowedPitches.filter((p) => p !== prev.pitch && p !== curr.pitch)[
+        Math.floor(rng() * allowedPitches.length)
+      ] ??
+      allowedPitches[Math.floor(rng() * allowedPitches.length)] ??
+      prev.pitch;
+    if (pitch === prev.pitch || pitch === curr.pitch) continue;
     ghosts.push({
       pitch,
       startTime: ghostTime,

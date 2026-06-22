@@ -135,7 +135,9 @@ export function postProcessMelody(
     processed = applySwing(processed, profile.swing, beatsPerBar);
     processed = applyVelocityHumanize(processed, rng, profile.velocityAccent);
     processed = addGhostNotes(processed, scalePitches, rng, profile.ghostNoteChance);
-    processed = addHarmonicFillers(processed, progression, beatsPerBar, rng, 0.32);
+    if (mode === "hybrid") {
+      processed = addHarmonicFillers(processed, progression, beatsPerBar, rng, 0.12);
+    }
   }
 
   if (processed.length > 1 && mode === "melody") {
