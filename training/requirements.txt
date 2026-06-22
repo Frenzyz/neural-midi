@@ -4,3 +4,4 @@ numpy>=1.24.0
 requests>=2.31.0
 tqdm>=4.66.0
 onnx>=1.15.0
+huggingface_hub>=0.20.0

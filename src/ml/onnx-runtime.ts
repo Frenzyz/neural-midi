@@ -3,8 +3,10 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import { createFloat32Tensor, createInt64ScalarTensor, float32Vector } from "./onnx-tensors.js";
 
-export const MODEL_FILENAME = "melody-v1.onnx";
-const HIDDEN_SIZE = 128;
+export const MODEL_FILENAMES = ["melody-v2.onnx", "melody-v1.onnx"] as const;
+
+let hiddenSize = 128;
+let gruLayers = 1;
 
 type OrtModule = typeof import("onnxruntime-node");
 type InferenceSession = import("onnxruntime-node").InferenceSession;
@@ -14,7 +16,31 @@ let session: InferenceSession | null = null;
 let modelPath: string | null = null;
 let loadPromise: Promise<boolean> | null = null;
 
-/** Paths where onnxruntime-node may live (bundled vendor first). */
+function configureForModel(resolved: string): void {
+  if (resolved.includes("melody-v2")) {
+    hiddenSize = 256;
+    gruLayers = 2;
+  } else {
+    hiddenSize = 128;
+    gruLayers = 1;
+  }
+}
+
+export function getHiddenStateSize(): number {
+  return hiddenSize * gruLayers;
+}
+
+export function getHiddenTensorDims(): [number, number, number] {
+  return [gruLayers, 1, hiddenSize];
+}
+
+export function getOnnxModelVersion(): string {
+  return gruLayers > 1 ? "onnx-v2.0" : "onnx-v1.0";
+}
+
+/** @deprecated use getHiddenStateSize */
+export const HIDDEN_SIZE = 128;
+
 export function ortPackageCandidates(): string[] {
   const dirs = [
     path.join(__dirname, "vendor", "node_modules", "onnxruntime-node"),
@@ -26,11 +52,8 @@ export function ortPackageCandidates(): string[] {
 
 function loadOrt(): OrtModule | null {
   if (ortModule) return ortModule;
-
   const req = createRequire(__filename);
-  const candidates = ortPackageCandidates();
-
-  for (const ortDir of candidates) {
+  for (const ortDir of ortPackageCandidates()) {
     try {
       const mod = req(ortDir) as OrtModule;
       if (typeof mod.InferenceSession?.create !== "function") continue;
@@ -41,17 +64,18 @@ function loadOrt(): OrtModule | null {
       console.warn(`[Neural Midi] onnxruntime load failed (${ortDir}):`, err);
     }
   }
-
   console.warn("[Neural Midi] onnxruntime-node not available — using rule-based engine");
   return null;
 }
 
 export function candidateModelPaths(storageDirectory: string): string[] {
-  return [
-    path.join(storageDirectory, "models", MODEL_FILENAME),
-    path.join(process.cwd(), "models", MODEL_FILENAME),
-    path.join(__dirname, "models", MODEL_FILENAME),
-  ];
+  const paths: string[] = [];
+  for (const name of MODEL_FILENAMES) {
+    paths.push(path.join(storageDirectory, "models", name));
+    paths.push(path.join(process.cwd(), "models", name));
+    paths.push(path.join(__dirname, "models", name));
+  }
+  return paths;
 }
 
 export function findModelPath(storageDirectory: string): string | null {
@@ -59,15 +83,15 @@ export function findModelPath(storageDirectory: string): string | null {
 }
 
 export async function ensureModelInStorage(storageDirectory: string): Promise<string | null> {
+  const found = findModelPath(storageDirectory);
+  if (!found) return null;
+
   const destDir = path.join(storageDirectory, "models");
-  const dest = path.join(destDir, MODEL_FILENAME);
-  if (fs.existsSync(dest)) return dest;
-
-  const source = candidateModelPaths(storageDirectory).find((p) => fs.existsSync(p) && p !== dest);
-  if (!source) return null;
-
-  fs.mkdirSync(destDir, { recursive: true });
-  fs.copyFileSync(source, dest);
+  const dest = path.join(destDir, path.basename(found));
+  if (!fs.existsSync(dest)) {
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.copyFileSync(found, dest);
+  }
   return dest;
 }
 
@@ -80,6 +104,7 @@ export async function loadOnnxSession(storageDirectory: string): Promise<boolean
     const resolved = await ensureModelInStorage(storageDirectory);
     if (!resolved) return false;
 
+    configureForModel(resolved);
     session = await ort.InferenceSession.create(resolved, {
       executionProviders: ["cpu"],
     });
@@ -114,12 +139,13 @@ export async function runMelodyStep(
     throw new Error("ONNX session not loaded");
   }
 
+  const [layers, , size] = getHiddenTensorDims();
   const feeds: Record<string, import("onnxruntime-node").Tensor> = {
     prev_token: createInt64ScalarTensor(ortModule.Tensor, prevToken),
     chord_root: createFloat32Tensor(ortModule.Tensor, chordRoot, [1, 12]),
     chord_quality: createFloat32Tensor(ortModule.Tensor, chordQuality, [1, 6]),
     position: createInt64ScalarTensor(ortModule.Tensor, position),
-    h_in: createFloat32Tensor(ortModule.Tensor, hidden, [1, 1, HIDDEN_SIZE]),
+    h_in: createFloat32Tensor(ortModule.Tensor, hidden, [layers, 1, size]),
   };
 
   const out = await session.run(feeds);
@@ -127,5 +153,3 @@ export async function runMelodyStep(
   const hOut = float32Vector(out.h_out!.data as ArrayLike<number>);
   return { logits, hidden: hOut };
 }
-
-export { HIDDEN_SIZE };

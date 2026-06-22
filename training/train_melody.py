@@ -21,7 +21,7 @@ from tqdm import tqdm
 
 VOCAB = 13  # 12 pitch classes + REST
 REST = 12
-HIDDEN = 128
+HIDDEN = 256
 POSITIONS = 16
 GRID = 0.25
 
@@ -144,10 +144,10 @@ class MelodyDataset(Dataset):
 class MelodyStepModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.token_embed = nn.Embedding(VOCAB, 32)
-        self.pos_embed = nn.Embedding(POSITIONS, 32)
-        self.chord_proj = nn.Linear(18, 32)
-        self.gru = nn.GRU(32, HIDDEN, batch_first=True)
+        self.token_embed = nn.Embedding(VOCAB, 48)
+        self.pos_embed = nn.Embedding(POSITIONS, 48)
+        self.chord_proj = nn.Linear(18, 48)
+        self.gru = nn.GRU(48, HIDDEN, num_layers=2, batch_first=True, dropout=0.1)
         self.head = nn.Linear(HIDDEN, VOCAB)
 
     def forward(self, prev_token, chord_root, chord_quality, position, h_in):
@@ -170,7 +170,7 @@ def export_onnx(model: MelodyStepModel, out_path: Path) -> None:
     chord_quality = torch.zeros(1, 6)
     chord_quality[0, 0] = 1.0
     position = torch.zeros(1, 1, dtype=torch.long)
-    h_in = torch.zeros(1, 1, HIDDEN)
+    h_in = torch.zeros(2, 1, HIDDEN)
 
     torch.onnx.export(
         model,
@@ -195,10 +195,10 @@ def export_onnx(model: MelodyStepModel, out_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=Path, default=Path("training/data/midi"))
-    parser.add_argument("--out", type=Path, default=Path("models/melody-v1.onnx"))
-    parser.add_argument("--epochs", type=int, default=8)
-    parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--max-files", type=int, default=200)
+    parser.add_argument("--out", type=Path, default=Path("models/melody-v2.onnx"))
+    parser.add_argument("--epochs", type=int, default=12)
+    parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument("--max-files", type=int, default=5000)
     parser.add_argument("--lr", type=float, default=1e-3)
     args = parser.parse_args()
 
@@ -223,7 +223,7 @@ def main() -> None:
         total_loss = 0.0
         count = 0
         for prev_t, next_t, root, qual, pos in loader:
-            h0 = torch.zeros(1, prev_t.size(0), HIDDEN)
+            h0 = torch.zeros(2, prev_t.size(0), HIDDEN)
             logits, _ = model(prev_t.unsqueeze(1), root, qual, pos.unsqueeze(1), h0)
             loss = loss_fn(logits, next_t)
             opt.zero_grad()

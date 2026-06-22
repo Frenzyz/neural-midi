@@ -4,11 +4,18 @@ An [Ableton Live Extension](https://www.ableton.com/en/live/extensions/) that ge
 
 ## Status
 
-Phrase-based melody engine (`stub-0.3.0`) with **chord-aware generation** and optional **ONNX inference** (`melody-v1.onnx`). Uses ONNX when the model file is present; otherwise falls back to the rule-based engine.
+Phrase-based melody engine (`stub-0.4.0`) with **chord-aware generation**, **post-processing** (quantize, chord-tone snap, articulation), and optional **ONNX inference** (`melody-v2.onnx`, falls back to `melody-v1.onnx`). Uses ONNX when a model file is present; otherwise falls back to the rule-based engine.
 
-## Train the ONNX model (MAESTRO dataset)
+## Train the ONNX model (multi-dataset)
 
-The training pipeline downloads **[MAESTRO v3.0.0](https://magenta.tensorflow.org/datasets/maestro)** (CC BY-NC-SA 4.0) — ~90 MB zip, piano performances with aligned MIDI. By default we use the first **200 files** (~subset) for a fast first train.
+The training pipeline supports several research datasets via `--datasets`:
+
+| Dataset | Source | Notes |
+|---------|--------|--------|
+| **maestro** | [MAESTRO v3.0.0](https://magenta.tensorflow.org/datasets/maestro) | Piano performances (CC BY-NC-SA 4.0) |
+| **pop909** | [POP909](https://github.com/music-x-lab/POP909-Dataset) | Pop melodies + chords |
+| **jsb** | Bach chorales (GitHub) | Harmonic grounding |
+| **lmd** | HuggingFace `mkorzeniowski/lmd_matched_melody` | Lakh MIDI melody subset (optional; skipped if unavailable) |
 
 ```bash
 cd /Users/aaditchetan/Projects/neural-midi
@@ -16,14 +23,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r training/requirements.txt
 
-# Download + extract MAESTRO subset → training/data/midi/
-python training/download_data.py --max-files 200
+# Download thousands of melody MIDIs → training/data/midi/
+python training/download_data.py --datasets maestro,pop909,jsb,lmd --max-per-dataset 2000
 
-# Train chord-conditioned GRU and export models/melody-v1.onnx (~1–3 min CPU)
-python training/train_melody.py --epochs 8 --max-files 200
+# Train larger 2-layer GRU (hidden 256) → models/melody-v2.onnx
+python training/train_melody.py --epochs 12 --max-files 5000
 ```
 
-First run downloads MAESTRO to `training/data/` (gitignored). Rebuild the extension after training:
+First run downloads to `training/data/` (gitignored). Rebuild after training:
 
 ```bash
 npm run build
@@ -42,20 +49,30 @@ In the **Generate Melody** dialog, choose a chord source:
 
 Chords are inferred per bar from simultaneous notes. Both the ONNX model and stub engine use the progression to bias toward chord tones.
 
-## Sequence editor
+## Sequence editor (MIDI Wizard layout)
 
-Right-click a MIDI clip → **Neural Midi → Sequence Editor…** to open the in-Live editor modal.
+Right-click a MIDI clip → **Neural Midi → Sequence Editor…** to open the in-Live editor modal (920×640).
+
+Inspired by Unison MIDI Wizard:
+
+| Area | Controls |
+|------|----------|
+| **Top panel** | GENRE, KEY + scale, MODE (Chords / Hybrid / Melody), TYPE (Lead / Pluck), LENGTH (4 / 8 bars) |
+| **Center** | Large **NM** generate button |
+| **Chord lane** | Per-bar chord labels (Cm7, Fm7, …) from detected progression |
+| **Piano roll** | Note blocks with pitch labels; drag timeline to select a region |
+| **Velocity row** | Teal velocity stalks per note |
+| **Footer** | Play preview, Generate Selection, **Apply to Clip** |
 
 | Feature | How |
 |---------|-----|
-| **Preview** | **Play** / **Stop** — Web Audio preview of the current sequence (no clip write) |
-| **Generate all** | Replace the full sequence using global key, scale, genre, and seed |
-| **Partial generation** | Drag on the timeline to select a bar region → **Generate Selection** |
-| **Region overrides** | Enable *Override for selection* to use different key/scale/genre/temp/seed for the selection |
-| **Scale remap** | After generation, pick a new key/scale and click **Apply scale change** (preserves rhythm) |
+| **Preview** | Footer **Play** — Web Audio preview (no clip write) |
+| **Generate all** | Central **NM** button — full sequence from global settings |
+| **Partial generation** | Drag on the timeline → **Generate Selection** |
+| **Hybrid mode** | Locks melody to chord tones per bar when chords are detected |
 | **Apply to clip** | Writes the edited sequence into the Live clip |
 
-Generation runs on-device (ONNX when available, otherwise the rule-based engine). The editor reopens after each generate so you can preview and iterate before applying.
+Generation runs on-device (ONNX v2 when available, otherwise stub). The editor reopens after each generate so you can preview and iterate before applying.
 
 ## ONNX runtime in Live
 

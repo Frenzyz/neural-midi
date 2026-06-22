@@ -30,6 +30,12 @@ export type ChordQuality = "major" | "minor" | "dom7" | "min7" | "dim" | "sus";
 
 export type ChordMode = "none" | "same-track" | "clip-below";
 
+/** Melody generation mode (Wizard UI). */
+export type GenerationMode = "chords" | "hybrid" | "melody";
+
+/** Note articulation style (Wizard UI). */
+export type ArticulationType = "lead" | "pluck";
+
 export interface ChordEvent {
   startBeat: number;
   duration: number;
@@ -49,6 +55,8 @@ export interface GenerationParams {
   timeSignature: { numerator: number; denominator: number };
   chordMode: ChordMode;
   chordProgression?: ChordEvent[];
+  generationMode?: GenerationMode;
+  articulation?: ArticulationType;
 }
 
 export interface GenerationResult {

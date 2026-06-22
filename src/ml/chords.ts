@@ -10,6 +10,34 @@ const CHORD_TEMPLATES: { quality: ChordQuality; intervals: number[] }[] = [
   { quality: "sus", intervals: [0, 5, 7] },
 ];
 
+const KEY_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+const QUALITY_SUFFIX: Record<ChordQuality, string> = {
+  major: "",
+  minor: "m",
+  dom7: "7",
+  min7: "m7",
+  dim: "dim",
+  sus: "sus",
+};
+
+export function chordLabel(chord: ChordEvent | undefined): string {
+  if (!chord) return "—";
+  return `${KEY_NAMES[chord.rootPc] ?? "C"}${QUALITY_SUFFIX[chord.quality]}`;
+}
+
+export function chordLabelsPerBar(
+  progression: ChordEvent[],
+  bars: number,
+  beatsPerBar: number,
+): string[] {
+  const labels: string[] = [];
+  for (let bar = 0; bar < bars; bar++) {
+    labels.push(chordLabel(chordAtBeat(progression, bar * beatsPerBar)));
+  }
+  return labels;
+}
+
 export function pitchClassesAtTime(notes: MidiNote[], time: number): number[] {
   const pcs = new Set<number>();
   for (const n of notes) {

@@ -1,7 +1,7 @@
 import { float32Vector } from "./onnx-tensors.js";
 import { chordAtBeat } from "./chords.js";
 import { mulberry32, quantizeBeat } from "./melody-engine.js";
-import { runMelodyStep, HIDDEN_SIZE, isOnnxReady } from "./onnx-runtime.js";
+import { runMelodyStep, getHiddenStateSize, getOnnxModelVersion, isOnnxReady } from "./onnx-runtime.js";
 import {
   chordQualityOneHot,
   chordRootOneHot,
@@ -12,7 +12,7 @@ import {
 import type { GenerationParams, GenerationResult, MidiNote } from "./types.js";
 import { resolveTimeSignature, toNumber } from "../util/coerce.js";
 
-const ONNX_VERSION = "onnx-v1.0";
+const ONNX_VERSION = "onnx-v2.0";
 
 function sampleToken(logits: Float32Array, temperature: number, rng: () => number): number {
   const scaled = new Float32Array(VOCAB_SIZE);
@@ -54,7 +54,7 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
   const steps = Math.ceil(totalBeats / grid);
 
   let prevToken = REST_TOKEN;
-  let hidden = new Float32Array(HIDDEN_SIZE);
+  let hidden = new Float32Array(getHiddenStateSize());
   const notes: MidiNote[] = [];
   let octave = 5;
   let lastPitch = 60;
@@ -115,7 +115,7 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
 
   return {
     notes: deduped,
-    modelVersion: ONNX_VERSION,
+    modelVersion: getOnnxModelVersion(),
     usedStub: false,
   };
 }

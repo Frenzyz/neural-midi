@@ -6,6 +6,7 @@ import {
 } from "@ableton-extensions/sdk";
 
 import { generateMelody, loadModel, setLazyStorageDir } from "./ml/inference.js";
+import { chordLabelsPerBar } from "./ml/chords.js";
 import { resolveChordProgression } from "./ml/session-chords.js";
 import {
   mergeRegionNotes,
@@ -47,6 +48,8 @@ function editorStateFromDialog(dialog: EditorResult, prev: SequenceState): Seque
     temperature: dialog.temperature,
     seed: dialog.seed,
     chordMode: dialog.chordMode,
+    generationMode: dialog.generationMode,
+    articulation: dialog.articulation,
     selectionStart: dialog.selectionStart,
     selectionEnd: dialog.selectionEnd,
     useRegionSettings: dialog.useRegionSettings,
@@ -80,6 +83,8 @@ function buildGenerationParams(
     timeSignature,
     chordMode: dialog.chordMode,
     chordProgression,
+    generationMode: dialog.generationMode,
+    articulation: dialog.articulation,
   };
 }
 
@@ -155,6 +160,14 @@ export function activate(activation: ActivationContext): void {
       const timeSignature = resolveTimeSignature(song.scenes[0]);
       const beatsPerBar = timeSignature.numerator || 4;
 
+      const initialProgression = resolveChordProgression(
+        song,
+        clip,
+        args,
+        "same-track",
+        4,
+      );
+
       const initialState: SequenceState = {
         notes: toMidiNotes(clip.notes),
         key: "C",
@@ -164,6 +177,9 @@ export function activate(activation: ActivationContext): void {
         temperature: 0.7,
         seed: Math.floor(Math.random() * 1_000_000),
         chordMode: "same-track",
+        generationMode: initialProgression.length > 0 ? "hybrid" : "melody",
+        articulation: "lead",
+        chordLabels: chordLabelsPerBar(initialProgression, 4, beatsPerBar),
         tempo,
         timeSignature,
         selectionStart: 0,
@@ -177,7 +193,7 @@ export function activate(activation: ActivationContext): void {
       };
 
       const notes = await runSequenceEditor(
-        (url) => ext.ui.showModalDialog(url, 720, 520),
+        (url) => ext.ui.showModalDialog(url, 920, 640),
         initialState,
         async (dialog, regionStart, regionEnd, fullGenerate) => {
           const bars = fullGenerate

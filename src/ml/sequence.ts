@@ -1,4 +1,4 @@
-import type { ChordMode, Genre, MidiNote, Scale } from "./types.js";
+import type { ArticulationType, ChordMode, GenerationMode, Genre, MidiNote, Scale } from "./types.js";
 
 export interface SequenceState {
   notes: MidiNote[];
@@ -9,6 +9,9 @@ export interface SequenceState {
   temperature: number;
   seed: number;
   chordMode: ChordMode;
+  generationMode: GenerationMode;
+  articulation: ArticulationType;
+  chordLabels: string[];
   tempo: number;
   timeSignature: { numerator: number; denominator: number };
   selectionStart: number;
@@ -90,6 +93,8 @@ export interface EditorResult {
   temperature: number;
   seed: number;
   chordMode: ChordMode;
+  generationMode: GenerationMode;
+  articulation: ArticulationType;
   selectionStart: number;
   selectionEnd: number;
   useRegionSettings: boolean;

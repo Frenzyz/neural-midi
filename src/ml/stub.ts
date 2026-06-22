@@ -13,7 +13,7 @@ import {
   type RhythmEvent,
 } from "./melody-engine.js";
 
-const STUB_VERSION = "stub-0.3.0";
+const STUB_VERSION = "stub-0.4.0";
 
 function nearestChordIndex(pitches: number[], chord: ChordEvent): number {
   let best = 0;
@@ -204,6 +204,8 @@ export function generateStubMelody(params: GenerationParams): GenerationResult {
     const pattern = profile.patterns[patternIdx] ?? profile.patterns[0]!;
     const isFinalBar = bar === bars - 1;
     const chord = chordAtBeat(progression, barStart);
+    const mode = params.generationMode ?? (progression.length ? "hybrid" : "melody");
+    const chordForBar = mode === "melody" ? undefined : chord;
 
     const { notes, pitchIndex: nextIndex } = generateBarNotes(
       barStart,
@@ -219,7 +221,7 @@ export function generateStubMelody(params: GenerationParams): GenerationResult {
       temperature,
       profile.expressiveness,
       isFinalBar,
-      chord,
+      chordForBar,
     );
 
     pitchIndex = nextIndex;

@@ -1,6 +1,7 @@
 import type { GenerationParams, GenerationResult } from "./types.js";
 import { generateOnnxMelody } from "./onnx-generate.js";
 import { findModelPath, loadOnnxSession, isOnnxReady } from "./onnx-runtime.js";
+import { postProcessMelody } from "./post-process.js";
 import { generateStubMelody } from "./stub.js";
 
 let modelLoaded = false;
@@ -22,11 +23,21 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
   if (!isModelLoaded()) {
     await tryLazyOnnxLoad();
   }
+  let result: GenerationResult;
   if (isModelLoaded()) {
     const onnx = await generateOnnxMelody(params);
-    if (onnx && onnx.notes.length > 0) return onnx;
+    if (onnx && onnx.notes.length > 0) result = onnx;
+    else result = generateStubMelody(params);
+  } else {
+    result = generateStubMelody(params);
   }
-  return generateStubMelody(params);
+
+  const notes = postProcessMelody(result.notes, params, {
+    mode: params.generationMode ?? (params.chordProgression?.length ? "hybrid" : "melody"),
+    articulation: params.articulation ?? "lead",
+  });
+
+  return { ...result, notes };
 }
 
 let lazyStorageDir: string | null = null;
