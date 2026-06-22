@@ -15,6 +15,7 @@
     "build": "npm run typecheck && tsx build.ts",
     "build:prod": "npm run typecheck && tsx build.ts --production",
     "start": "npm run build && node scripts/dev-preflight.mjs && extensions-cli run --storage-directory \"$PWD/.dev/storage\" --temp-directory \"$PWD/.dev/temp\"",
+    "stop-host": "node scripts/stop-extension-host.mjs",
     "package": "npm run build:prod && node scripts/package.mjs",
     "test": "vitest run"
   },

@@ -6,7 +6,8 @@ Node.js helper scripts invoked by npm scripts and `build.ts`. Keep them as `.mjs
 
 - `setup-sdk.mjs` — Copies Ableton SDK/CLI tarballs from `ABLETON_SDK_PATH` → `vendor/` (`npm run setup`)
 - `vendor-onnx.mjs` — Platform-specific ORT binary + `onnxruntime-common` → `dist/vendor/node_modules/` (every build)
-- `dev-preflight.mjs` — Validates `.env`, Extension Host module, Live Beta running (`npm start`)
+- `dev-preflight.mjs` — Validates `.env`, Extension Host module, Live Beta running, no stale dev host (`npm start`)
+- `stop-extension-host.mjs` — Kills leftover `extensions-cli run` Extension Host processes (`npm run stop-host`)
 - `package.mjs` — Runs `extensions-cli package` → `release/Neural-Midi-0.1.0.ablx`
 
 ## Build Chain
@@ -15,6 +16,7 @@ Node.js helper scripts invoked by npm scripts and `build.ts`. Keep them as `.mjs
 npm run setup     → setup-sdk.mjs + npm install
 npm run build     → tsc + build.ts (model copy, vendor-onnx, esbuild)
 npm start         → build + dev-preflight + extensions-cli run
+npm run stop-host → stop-extension-host.mjs
 npm run package   → build:prod + package.mjs
 ```
 
@@ -24,7 +26,7 @@ npm run package   → build:prod + package.mjs
 
 - Read paths from `.env` (`ABLETON_SDK_PATH`, `EXTENSION_HOST_PATH`); never hardcode user machine paths
 - `vendor-onnx.mjs` selects platform binary (darwin/linux/win32, arm64/x64) — test after ORT version bumps
-- `dev-preflight.mjs` exits non-zero if Live is not running or Developer Mode is off
+- `dev-preflight.mjs` exits non-zero if Live is not running or a stale dev Extension Host is detected (cannot verify Developer Mode)
 - Package output includes `dist/vendor` and `dist/models` (~75 MB on Apple Silicon)
 
 ## Gotchas

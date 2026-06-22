@@ -20,9 +20,21 @@ function isLiveBetaRunning(livePath) {
   try {
     const needle = livePath.replace(/\/$/u, "");
     const ps = execSync("ps ax -o command=", { encoding: "utf8" });
-    return ps.split("\n").some((line) => line.includes(needle));
+    return ps.split("\n").some((line) => line.includes(needle) && line.includes("/MacOS/Live"));
   } catch {
     return false;
+  }
+}
+
+function listDevExtensionHosts() {
+  try {
+    const ps = execSync("ps ax -o pid=,command=", { encoding: "utf8" });
+    return ps
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.includes("ExtensionHostNodeModule.node") && line.includes("initialize"));
+  } catch {
+    return [];
   }
 }
 
@@ -52,14 +64,25 @@ if (!existsSync(hostModule)) {
 if (!isLiveBetaRunning(livePath)) {
   console.error("\n  dev-preflight: Ableton Live 12 Beta is not running.\n");
   console.error("  The Extension Host handshake times out (~25s) if Live is closed.");
-  console.error("  1. Open Ableton Live 12 Beta");
+  console.error("  1. Open Ableton Live 12 Beta and wait until a set is loaded");
   console.error("  2. Preferences → Extensions → enable Developer Mode");
-  console.error("  3. Leave Live running, then run: npm start\n");
+  console.error("  3. Run: npm start\n");
   process.exit(1);
 }
 
-console.log("  dev-preflight: OK — Live Beta running + Extension Host found");
+const staleHosts = listDevExtensionHosts();
+if (staleHosts.length > 0) {
+  console.error("\n  dev-preflight: stale Extension Host process(es) detected.\n");
+  console.error("  A previous `npm start` may still be running or was killed without cleanup.");
+  console.error("  This often causes: Extension Host bring-up timed out (control channel handshake)\n");
+  console.error("  Fix:");
+  console.error("    npm run stop-host");
+  console.error("    npm start\n");
+  process.exit(1);
+}
+
+console.log("  dev-preflight: OK — Live Beta running, no stale Extension Host");
 console.log("");
-console.log("  Ensure Developer Mode is ON (Preferences → Extensions).");
-console.log("  If handshake still fails, quit npm start, toggle Developer Mode, reopen Live, retry.");
+console.log("  Required: Preferences → Extensions → Developer Mode ON");
+console.log("  (Preflight cannot verify Developer Mode — if handshake fails, toggle it off/on and restart Live.)");
 console.log("");

@@ -81,17 +81,46 @@ npm run setup
 npm run build
 ```
 
-**Then in Live (required before `npm start`):**
+**Then in Live (required before starting the Extension Host):**
 
-1. Open **Ableton Live 12 Beta**
-2. **Preferences → Extensions → Developer Mode** ON
-3. Leave Live running
+1. Open **Ableton Live 12 Beta** and wait until a set is fully loaded
+2. **Preferences → Extensions → Developer Mode** ON (Live shuts down its built-in host; `npm start` launches yours)
+3. Leave Live running in the foreground
 
 ```bash
-npm start          # preflight checks + Extension Host
+npm start
 ```
 
-If you see `Extension Host bring-up timed out (control channel handshake)`, Live was not running or Developer Mode was off when the host started. Quit `npm start`, open Live with Developer Mode enabled, then run `npm start` again.
+Keep the terminal open while developing. After code changes, press Ctrl+C, then run `npm start` again.
+
+### Handshake timeout troubleshooting
+
+`Extension Host bring-up timed out (control channel handshake)` means Live never connected to the dev Extension Host. This happens **before** your extension loads — bundle size is not the cause.
+
+| Cause | Fix |
+|-------|-----|
+| **Developer Mode off** | Preferences → Extensions → turn **Developer Mode** ON. Toggle off → on if unsure. |
+| **Live not ready** | Open Live Beta first, load a set, then run `npm start`. |
+| **Stale Extension Host** | `npm run stop-host` then `npm start` (only one host at a time). |
+| **Previous `npm start` still running** | Ctrl+C the old terminal, or `npm run stop-host`. |
+| **Live needs restart** | Quit Live Beta completely, reopen, re-enable Developer Mode, `npm run stop-host`, `npm start`. |
+
+**Reliable sequence:**
+
+```bash
+npm run stop-host
+```
+
+Open Live 12 Beta → load a set → Developer Mode ON → then:
+
+```bash
+cd ~/Projects/neural-midi
+npm start
+```
+
+**Shell tip:** run `npm start` on its own line. Do not append comments on the same line (`npm start # …`) — the shell passes `#` as part of the path and breaks `extensions-cli`.
+
+Preflight checks Live is running and blocks stale hosts; it **cannot** detect Developer Mode (no public API). If preflight passes but handshake fails, Developer Mode is the most likely cause.
 
 ## Usage
 
