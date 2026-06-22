@@ -7,8 +7,15 @@ import {
 
 import { generateMelody, loadModel, setLazyStorageDir } from "./ml/inference.js";
 import { resolveChordProgression } from "./ml/session-chords.js";
+import {
+  mergeRegionNotes,
+  normalizeSelection,
+  regionBars,
+  type EditorResult,
+  type SequenceState,
+} from "./ml/sequence.js";
 import type { ChordMode, Genre, GenerationParams, MidiNote, Scale } from "./ml/types.js";
-import { buildGenerateDialogHtml, modalDialogUrl } from "./ui/generate-dialog.js";
+import { buildSequenceEditorHtml, modalDialogUrl } from "./ui/sequence-editor.js";
 import { toNumber, resolveTimeSignature } from "./util/coerce.js";
 
 function toMidiNotes(raw: unknown[]): MidiNote[] {
@@ -29,15 +36,98 @@ function fromMidiNotes(notes: MidiNote[]): MidiNote[] {
   }));
 }
 
-interface DialogResult {
-  action: string;
-  key: string;
-  scale: Scale;
-  genre: Genre;
-  bars: number;
-  temperature: number;
-  seed: number;
-  chordMode: ChordMode;
+function editorStateFromDialog(dialog: EditorResult, prev: SequenceState): SequenceState {
+  return {
+    ...prev,
+    notes: dialog.notes,
+    key: dialog.key,
+    scale: dialog.scale,
+    genre: dialog.genre,
+    bars: dialog.bars,
+    temperature: dialog.temperature,
+    seed: dialog.seed,
+    chordMode: dialog.chordMode,
+    selectionStart: dialog.selectionStart,
+    selectionEnd: dialog.selectionEnd,
+    useRegionSettings: dialog.useRegionSettings,
+    regionKey: dialog.regionKey,
+    regionScale: dialog.regionScale,
+    regionGenre: dialog.regionGenre,
+    regionTemperature: dialog.regionTemperature,
+    regionSeed: dialog.regionSeed,
+  };
+}
+
+function buildGenerationParams(
+  dialog: EditorResult,
+  tempo: number,
+  timeSignature: { numerator: number; denominator: number },
+  chordProgression: GenerationParams["chordProgression"],
+  regionStart: number,
+  regionEnd: number,
+  fullGenerate: boolean,
+): GenerationParams {
+  const beatsPerBar = timeSignature.numerator || 4;
+  const useRegion = !fullGenerate && dialog.useRegionSettings;
+  return {
+    key: useRegion ? dialog.regionKey : dialog.key,
+    scale: (useRegion ? dialog.regionScale : dialog.scale) as Scale,
+    genre: (useRegion ? dialog.regionGenre : dialog.genre) as Genre,
+    bars: fullGenerate ? dialog.bars : regionBars(regionStart, regionEnd, beatsPerBar),
+    temperature: useRegion ? dialog.regionTemperature : dialog.temperature,
+    seed: useRegion ? dialog.regionSeed : dialog.seed,
+    tempo,
+    timeSignature,
+    chordMode: dialog.chordMode,
+    chordProgression,
+  };
+}
+
+async function runSequenceEditor(
+  showModal: (url: string) => Promise<string | null>,
+  initial: SequenceState,
+  generate: (
+    dialog: EditorResult,
+    regionStart: number,
+    regionEnd: number,
+    fullGenerate: boolean,
+  ) => Promise<MidiNote[]>,
+): Promise<MidiNote[] | null> {
+  let state = initial;
+
+  for (;;) {
+    const resultJson = await showModal(modalDialogUrl(buildSequenceEditorHtml(state)));
+    if (!resultJson || resultJson === "null") return null;
+
+    const dialog = JSON.parse(resultJson) as EditorResult;
+    state = editorStateFromDialog(dialog, state);
+
+    if (dialog.action === "cancel") return null;
+
+    if (dialog.action === "apply") {
+      return fromMidiNotes(dialog.notes);
+    }
+
+    if (dialog.action === "generate_all" || dialog.action === "generate_selection") {
+      const beatsPerBar = state.timeSignature.numerator || 4;
+      const maxBeat = state.bars * beatsPerBar;
+      const fullGenerate = dialog.action === "generate_all";
+      let regionStart = 0;
+      let regionEnd = maxBeat;
+
+      if (!fullGenerate) {
+        const sel = normalizeSelection(dialog.selectionStart, dialog.selectionEnd, maxBeat);
+        regionStart = sel.start;
+        regionEnd = sel.end;
+      }
+
+      const generated = await generate(dialog, regionStart, regionEnd, fullGenerate);
+      state.notes = fullGenerate
+        ? generated
+        : mergeRegionNotes(state.notes, regionStart, regionEnd, generated);
+      continue;
+    }
+  }
 }
 
 export function activate(activation: ActivationContext): void {
@@ -63,62 +153,65 @@ export function activate(activation: ActivationContext): void {
 
       const tempo = toNumber(song.tempo, 120);
       const timeSignature = resolveTimeSignature(song.scenes[0]);
+      const beatsPerBar = timeSignature.numerator || 4;
 
-      const resultJson = await ext.ui.showModalDialog(
-        modalDialogUrl(
-          buildGenerateDialogHtml({
-            key: "C",
-            scale: "major",
-            genre: "pop",
-            bars: 4,
-            temperature: 0.7,
-            seed: Math.floor(Math.random() * 1_000_000),
-            tempo,
-            chordMode: "same-track",
-          }),
-        ),
-        480,
-        460,
-      );
-
-      if (!resultJson || resultJson === "null") return;
-
-      const dialog = JSON.parse(resultJson) as DialogResult;
-      if (dialog.action !== "generate") return;
-
-      const bars = Math.max(1, Math.min(8, toNumber(dialog.bars, 4)));
-      const chordMode = dialog.chordMode ?? "none";
-      const chordProgression = resolveChordProgression(
-        song,
-        clip,
-        args,
-        chordMode,
-        bars,
-      );
-
-      const params: GenerationParams = {
-        key: dialog.key,
-        scale: dialog.scale,
-        genre: dialog.genre,
-        bars,
-        temperature: toNumber(dialog.temperature, 0.7),
-        seed: toNumber(dialog.seed, 0),
+      const initialState: SequenceState = {
+        notes: toMidiNotes(clip.notes),
+        key: "C",
+        scale: "major",
+        genre: "pop",
+        bars: 4,
+        temperature: 0.7,
+        seed: Math.floor(Math.random() * 1_000_000),
+        chordMode: "same-track",
         tempo,
         timeSignature,
-        chordMode,
-        chordProgression: chordProgression.length > 0 ? chordProgression : undefined,
+        selectionStart: 0,
+        selectionEnd: beatsPerBar,
+        useRegionSettings: false,
+        regionKey: "C",
+        regionScale: "major",
+        regionGenre: "pop",
+        regionTemperature: 0.7,
+        regionSeed: Math.floor(Math.random() * 1_000_000),
       };
 
-      const result = await generateMelody(params);
-      const notes = fromMidiNotes(result.notes);
+      const notes = await runSequenceEditor(
+        (url) => ext.ui.showModalDialog(url, 720, 520),
+        initialState,
+        async (dialog, regionStart, regionEnd, fullGenerate) => {
+          const bars = fullGenerate
+            ? dialog.bars
+            : Math.ceil((regionEnd - regionStart) / beatsPerBar) || 1;
+          const chordProgression = resolveChordProgression(
+            song,
+            clip,
+            args,
+            dialog.chordMode,
+            bars,
+          );
+          const params = buildGenerationParams(
+            dialog,
+            tempo,
+            timeSignature,
+            chordProgression.length > 0 ? chordProgression : undefined,
+            regionStart,
+            regionEnd,
+            fullGenerate,
+          );
+          const result = await generateMelody(params);
+          const regionBeats = regionEnd - regionStart;
+          return result.notes.filter((n) => n.startTime < regionBeats);
+        },
+      );
+
+      if (!notes) return;
 
       ext.withinTransaction(() => {
         clip.notes = notes;
       });
 
-      console.log(
-        `[Neural Midi] Wrote ${notes.length} notes (model: ${result.modelVersion}, stub: ${result.usedStub}, chords: ${chordProgression.length})`,
-      );
+      console.log(`[Neural Midi] Applied ${notes.length} notes to clip`);
     } catch (err) {
       console.error("[Neural Midi] generate error:", err);
     }
@@ -166,6 +259,6 @@ export function activate(activation: ActivationContext): void {
     }
   });
 
-  ext.ui.registerContextMenuAction("MidiClip", "Generate Melody…", "neuralMidi.generate");
+  ext.ui.registerContextMenuAction("MidiClip", "Sequence Editor…", "neuralMidi.generate");
   ext.ui.registerContextMenuAction("MidiClip", "Continue Melody", "neuralMidi.continue");
 }

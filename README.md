@@ -42,6 +42,21 @@ In the **Generate Melody** dialog, choose a chord source:
 
 Chords are inferred per bar from simultaneous notes. Both the ONNX model and stub engine use the progression to bias toward chord tones.
 
+## Sequence editor
+
+Right-click a MIDI clip → **Neural Midi → Sequence Editor…** to open the in-Live editor modal.
+
+| Feature | How |
+|---------|-----|
+| **Preview** | **Play** / **Stop** — Web Audio preview of the current sequence (no clip write) |
+| **Generate all** | Replace the full sequence using global key, scale, genre, and seed |
+| **Partial generation** | Drag on the timeline to select a bar region → **Generate Selection** |
+| **Region overrides** | Enable *Override for selection* to use different key/scale/genre/temp/seed for the selection |
+| **Scale remap** | After generation, pick a new key/scale and click **Apply scale change** (preserves rhythm) |
+| **Apply to clip** | Writes the edited sequence into the Live clip |
+
+Generation runs on-device (ONNX when available, otherwise the rule-based engine). The editor reopens after each generate so you can preview and iterate before applying.
+
 ## ONNX runtime in Live
 
 `onnxruntime-node` is a **native Node addon** and cannot be bundled into `dist/extension.js`. On `npm run build`, the build copies the platform-specific binary plus `onnxruntime-common` into `dist/vendor/node_modules/`. The extension loads ONNX from that vendored path first (via `createRequire(__filename)`), so it works in Live's Extension Host even when `process.cwd()` is not the project directory.
@@ -78,11 +93,9 @@ npm start          # preflight checks + Extension Host
 
 If you see `Extension Host bring-up timed out (control channel handshake)`, Live was not running or Developer Mode was off when the host started. Quit `npm start`, open Live with Developer Mode enabled, then run `npm start` again.
 
-## Usage (planned)
+## Usage
 
-Right-click a MIDI clip (or empty clip slot) → **Neural Midi → Generate Melody**.
-
-Configure key, scale, genre, bar count, and temperature, then generate one or more melody variations directly into the clip — no cloud calls, no account required.
+Right-click a MIDI clip → **Neural Midi → Sequence Editor…** to generate, preview, and edit melodies before writing to the clip.
 
 ## Architecture
 
