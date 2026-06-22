@@ -36,6 +36,9 @@ export type GenerationMode = "chords" | "hybrid" | "melody";
 /** Note articulation style (Wizard UI). */
 export type ArticulationType = "lead" | "pluck";
 
+/** Generation style preset — controls density at sample time, not post-delete. */
+export type StylePreset = "clean" | "expressive" | "dense";
+
 export interface ChordEvent {
   startBeat: number;
   duration: number;
@@ -57,6 +60,11 @@ export interface GenerationParams {
   chordProgression?: ChordEvent[];
   generationMode?: GenerationMode;
   articulation?: ArticulationType;
+  /** Musical expressiveness 0–1 (generation-time density/rest bias). Default 0.5. */
+  expression?: number;
+  stylePreset?: StylePreset;
+  /** Opt-in light post-filter; off by default. */
+  tightenPhrasing?: boolean;
 }
 
 export interface GenerationResult {

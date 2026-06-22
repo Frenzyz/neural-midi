@@ -8,9 +8,17 @@ import {
   SCALE_INTERVALS,
 } from "./melody-engine.js";
 import { fillPhraseGaps, GRID } from "./pattern-engine.js";
-import { minMelodyNotes, minNotesPerBar } from "./taste-filter.js";
 
 const SPARSE_GENRES: Set<Genre> = new Set(["lofi", "ambient", "rnb"]);
+
+function minNotesPerBar(genre?: Genre): number {
+  if (genre && SPARSE_GENRES.has(genre)) return 1.2;
+  return 1.8;
+}
+
+function minMelodyNotes(bars: number, genre?: Genre): number {
+  return Math.max(4, Math.ceil(bars * minNotesPerBar(genre)));
+}
 
 /** Average note count per bar (polyphony-aware). */
 export function notesPerBar(notes: MidiNote[], beatsPerBar: number, bars: number): number {

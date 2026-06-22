@@ -1,5 +1,6 @@
 import { float32Vector } from "./onnx-tensors.js";
 import { chordAtBeat } from "./chords.js";
+import { resolveExpression } from "./expression.js";
 import { addHarmonyLayer, applyLegatoOverlap, mergeVoices } from "./pattern-engine.js";
 import { mulberry32, quantizeBeat } from "./melody-engine.js";
 import { runMelodyStep, getHiddenStateSize, getOnnxModelVersion, isOnnxReady } from "./onnx-runtime.js";
@@ -33,6 +34,20 @@ function sampleToken(logits: Float32Array, temperature: number, rng: () => numbe
   return REST_TOKEN;
 }
 
+/** Down-weight same pitch token when it would extend a 2-note repeat streak. */
+function applyRepeatPitchPenalty(
+  logits: Float32Array,
+  recentPitchTokens: number[],
+  penalty: number,
+): void {
+  if (recentPitchTokens.length < 2 || penalty <= 0) return;
+  const last = recentPitchTokens[recentPitchTokens.length - 1]!;
+  const prev = recentPitchTokens[recentPitchTokens.length - 2]!;
+  if (last !== REST_TOKEN && last === prev) {
+    logits[last] = (logits[last] ?? 0) - penalty;
+  }
+}
+
 function tokenToMidiPitch(token: number, octave: number): number {
   return octave * 12 + token;
 }
@@ -47,7 +62,8 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
   });
   const bars = Math.max(1, toNumber(params.bars, 4));
   const totalBeats = bars * beatsPerBar;
-  const temperature = Math.max(0.1, toNumber(params.temperature, 0.7));
+  const expr = resolveExpression(params);
+  const temperature = expr.sampleTemperature;
   const progression = params.chordProgression ?? [];
   const grid = 0.25;
   const steps = Math.ceil(totalBeats / grid);
@@ -55,6 +71,7 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
   let prevToken = REST_TOKEN;
   let hidden = new Float32Array(getHiddenStateSize());
   const notes: MidiNote[] = [];
+  const recentPitchTokens: number[] = [];
   let octave = 5;
   let lastPitch = 60;
 
@@ -72,16 +89,23 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
     );
     hidden = Float32Array.from(hOut);
 
-    const token = sampleToken(logits, temperature, rng);
+    const logitsForSample = Float32Array.from(logits);
+    applyRepeatPitchPenalty(logitsForSample, recentPitchTokens, expr.repeatPitchPenalty);
+
+    const token = sampleToken(logitsForSample, temperature, rng);
     prevToken = token;
 
     let pitchToken = token;
-    if (pitchToken === REST_TOKEN && rng() < 0.15) {
-      pitchToken = sampleToken(logits, Math.max(0.2, temperature * 0.9), rng);
+    if (pitchToken === REST_TOKEN && rng() < expr.restResampleProb) {
+      applyRepeatPitchPenalty(logitsForSample, recentPitchTokens, expr.repeatPitchPenalty);
+      pitchToken = sampleToken(logitsForSample, Math.max(0.2, temperature * 0.9), rng);
       prevToken = pitchToken;
     }
 
     if (pitchToken === REST_TOKEN) continue;
+
+    recentPitchTokens.push(pitchToken);
+    if (recentPitchTokens.length > 4) recentPitchTokens.shift();
 
     const durationChoices = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
     const durationWeights = [0.12, 0.2, 0.28, 0.15, 0.15, 0.1];

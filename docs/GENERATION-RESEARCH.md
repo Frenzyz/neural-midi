@@ -22,11 +22,27 @@ Neural Midi cannot ship proprietary fragments; we approximate this with **open g
 | Motif + variation | `src/ml/pattern-engine.ts` — `motifFromFragment`, `phraseFromMotifs`, call-and-response |
 | Genre progressions | `defaultDiatonicProgression()` uses genre templates in `chords.ts` |
 | Hybrid locking | Hybrid mode + chord-tone snap in `post-process.ts` + chord stabs |
-| Humanization | `src/ml/humanize.ts` — swing, velocity accents, ghost notes |
+| Humanization | `src/ml/humanize.ts` — swing, velocity accents (ghost notes opt-in via expression) |
 | History / iterate | In-modal generation stack (`sequence-history.ts`) with back/forward |
-| Density targets | `src/ml/density.ts` — per-mode min notes/bar + polyphony; `boostDensityIfSparse` in inference |
-| Harmonic stacks | `pattern-engine.ts` — `addHarmonicStacks`, `arpeggiateChordBar`; hybrid uses `generateHybridAccompaniment` |
-| Passing tones | `humanize.ts` — `addHarmonicFillers` wired in `post-process.ts` |
+| Expressiveness | `src/ml/expression.ts` — generation-time density/rest/repeat controls |
+| Harmonic stacks | `pattern-engine.ts` — `addHarmonicStacks`; Dense style + hybrid use `generateHybridAccompaniment` |
+
+## Generation-time expressiveness (June 2025)
+
+Philosophy: **shape output at sample time**, not by deleting notes afterward.
+
+| Control | Where it applies |
+|---------|------------------|
+| **Expression** slider (0–1, default 0.3) | `expression.ts` → ONNX rest resample prob, repeat-pitch logit penalty, harmony density |
+| **Style** preset (Clean / Expressive / Dense) | Rest bias, hybrid accompaniment (Dense), ghost notes off by default |
+| **Tighten phrasing** toggle (off) | Opt-in `applyLightTasteFilter` only — caps 4 same-pitch hits, collapses 7+ runs |
+| **Temperature** | ONNX softmax sharpness (advanced) |
+
+Removed from default pipeline: mandatory `applyTasteFilter`, `ensureMinimumPhraseDensity`, `boostDensityIfSparse`, post-hoc ghost notes / harmonic fillers.
+
+`post-process.ts` keeps quantize, scale/chord snap, legato overlap trim, swing, velocity humanize.
+
+Anti machine-gun: repeat-pitch logit bias in `onnx-generate.ts`; pattern engine stepwise motion in stub path.
 
 ## Density & harmony pass (June 2025)
 

@@ -6,10 +6,11 @@ import {
   generateChordVoicings,
   generateHybridAccompaniment,
 } from "./chords.js";
-import { applyTasteFilter, ensureMinimumPhraseDensity } from "./taste-filter.js";
+import { resolveExpression } from "./expression.js";
 import { mulberry32 } from "./melody-engine.js";
 import { postProcessHybrid, postProcessMelody } from "./post-process.js";
 import { addHarmonicStacks } from "./pattern-engine.js";
+import { applyLightTasteFilter } from "./taste-filter.js";
 import { generateStubMelody } from "./stub.js";
 import { resolveTimeSignature, toNumber } from "../util/coerce.js";
 
@@ -54,6 +55,7 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
 
   const mode = resolveMode(params);
   const articulation = params.articulation ?? "lead";
+  const expr = resolveExpression(params);
   const { numerator: beatsPerBar } = resolveTimeSignature({
     signatureNumerator: params.timeSignature.numerator,
     signatureDenominator: params.timeSignature.denominator,
@@ -88,18 +90,27 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
     result = generateStubMelody(params);
   }
 
+  logNoteCount("raw-generate", result.notes);
+
   let notes = postProcessMelody(result.notes, { ...params, chordProgression: progression }, {
     mode: "melody",
     articulation,
+    ghostNoteChance: expr.ghostNoteChance,
   });
   logNoteCount("post-process", notes);
 
   const rng = mulberry32(toNumber(params.seed, 1) + 31);
-  if (progression.length > 0 && mode !== "melody") {
-    notes = addHarmonicStacks(notes, progression, rng, mode === "hybrid" ? 0.45 : 0.35);
+
+  const wantHarmony =
+    progression.length > 0 &&
+    (mode === "hybrid" || (mode === "melody" && expr.hybridAccompaniment));
+  if (wantHarmony && expr.harmonyDensity > 0) {
+    notes = addHarmonicStacks(notes, progression, rng, expr.harmonyDensity);
   }
 
-  if (mode === "hybrid" && progression.length > 0) {
+  const wantAccompaniment =
+    progression.length > 0 && (mode === "hybrid" || expr.hybridAccompaniment);
+  if (wantAccompaniment) {
     const accompaniment = generateHybridAccompaniment(
       progression,
       beatsPerBar,
@@ -108,27 +119,13 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
       rng,
     );
     notes = postProcessHybrid(notes, accompaniment, { ...params, chordProgression: progression }, articulation);
+    logNoteCount("hybrid-layer", notes);
   }
 
-  notes = applyTasteFilter(notes, {
-    mode,
-    beatsPerBar,
-    bars,
-    seed: toNumber(params.seed, 1),
-    genre: params.genre,
-  });
-  logNoteCount("taste-filter", notes);
-
-  notes = ensureMinimumPhraseDensity(notes, {
-    mode,
-    beatsPerBar,
-    bars,
-    seed: toNumber(params.seed, 1),
-    genre: params.genre,
-    key: params.key,
-    scale: params.scale,
-  });
-  logNoteCount("min-density", notes);
+  if (params.tightenPhrasing) {
+    notes = applyLightTasteFilter(notes, { mode, seed: toNumber(params.seed, 1) });
+    logNoteCount("tighten", notes);
+  }
 
   return { ...result, notes };
 }

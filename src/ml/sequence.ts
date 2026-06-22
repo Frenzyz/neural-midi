@@ -1,4 +1,4 @@
-import type { ArticulationType, ChordMode, GenerationMode, Genre, MidiNote, Scale } from "./types.js";
+import type { ArticulationType, ChordMode, GenerationMode, Genre, MidiNote, Scale, StylePreset } from "./types.js";
 
 export interface SequenceState {
   notes: MidiNote[];
@@ -7,6 +7,9 @@ export interface SequenceState {
   genre: Genre;
   bars: number;
   temperature: number;
+  expression: number;
+  stylePreset: StylePreset;
+  tightenPhrasing: boolean;
   seed: number;
   chordMode: ChordMode;
   generationMode: GenerationMode;
@@ -23,6 +26,9 @@ export interface SequenceState {
   regionScale: Scale;
   regionGenre: Genre;
   regionTemperature: number;
+  regionExpression: number;
+  regionStylePreset: StylePreset;
+  regionTightenPhrasing: boolean;
   regionSeed: number;
 }
 
@@ -100,6 +106,9 @@ export interface EditorResult {
   genre: Genre;
   bars: number;
   temperature: number;
+  expression: number;
+  stylePreset: StylePreset;
+  tightenPhrasing: boolean;
   seed: number;
   chordMode: ChordMode;
   generationMode: GenerationMode;
@@ -111,6 +120,9 @@ export interface EditorResult {
   regionScale: Scale;
   regionGenre: Genre;
   regionTemperature: number;
+  regionExpression: number;
+  regionStylePreset: StylePreset;
+  regionTightenPhrasing: boolean;
   regionSeed: number;
   remapToKey?: string;
   remapToScale?: Scale;

@@ -203,6 +203,9 @@ function collectBase() {
     genre: document.getElementById("genre").value,
     bars: Number(segValue("lengthSeg") || state.bars),
     temperature: Number(document.getElementById("temperature").value),
+    expression: Number(document.getElementById("expression").value),
+    stylePreset: segValue("styleSeg") || "expressive",
+    tightenPhrasing: document.getElementById("tightenPhrasing").checked,
     seed: Number(document.getElementById("seed").value),
     chordMode: document.getElementById("chordMode").value,
     generationMode: segValue("modeSeg"),
@@ -214,6 +217,9 @@ function collectBase() {
     regionScale: document.getElementById("scale").value,
     regionGenre: document.getElementById("genre").value,
     regionTemperature: Number(document.getElementById("temperature").value),
+    regionExpression: Number(document.getElementById("expression").value),
+    regionStylePreset: segValue("styleSeg") || "expressive",
+    regionTightenPhrasing: document.getElementById("tightenPhrasing").checked,
     regionSeed: Number(document.getElementById("seed").value),
     tempo: state.tempo,
     timeSignature: state.timeSignature,
@@ -556,8 +562,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const tempVal = document.getElementById("tempVal");
   temp.addEventListener("input", () => { tempVal.textContent = Number(temp.value).toFixed(2); });
 
+  const expr = document.getElementById("expression");
+  const exprVal = document.getElementById("exprVal");
+  expr.addEventListener("input", () => { exprVal.textContent = Number(expr.value).toFixed(2); });
+
   setupSeg("modeSeg");
   setupSeg("typeSeg");
+  setupSeg("styleSeg");
   setupSeg("lengthSeg", (v) => {
     state.bars = Number(v);
     selectedBars = selectedBars.filter((b) => b < state.bars);
@@ -600,6 +611,8 @@ document.addEventListener("DOMContentLoaded", () => {
         ${segButtons("typeSeg", [["lead", "LEAD"], ["pluck", "PLUCK"]], state.articulation ?? "lead")}</div>
       <div class="wiz-row"><span class="wiz-label">LENGTH</span>
         ${segButtons("lengthSeg", [["4", "4 BARS"], ["8", "8 BARS"]], String(state.bars === 8 ? 8 : 4))}</div>
+      <div class="wiz-row"><span class="wiz-label">STYLE</span>
+        ${segButtons("styleSeg", [["clean", "CLEAN"], ["expressive", "EXPR"], ["dense", "DENSE"]], state.stylePreset ?? "expressive")}</div>
     </div>
     <div class="gen-nav">
       <div class="gen-row">
@@ -610,8 +623,13 @@ document.addEventListener("DOMContentLoaded", () => {
       <button class="gen-logo" id="generate" type="button" title="Generate new melody">${NM_LOGO_SVG}</button>
     </div>
     <div class="wiz-meta">
-      <div>Temp <span id="tempVal">${state.temperature.toFixed(2)}</span></div>
+      <div>Expression <span id="exprVal">${(state.expression ?? 0.3).toFixed(2)}</span></div>
+      <input type="range" id="expression" min="0" max="1" step="0.05" value="${state.expression ?? 0.3}" style="width:120px" />
+      <div style="margin-top:4px">Temp <span id="tempVal">${state.temperature.toFixed(2)}</span></div>
       <input type="range" id="temperature" min="0" max="1" step="0.05" value="${state.temperature}" style="width:120px" />
+      <label style="display:block;margin-top:6px;font-size:11px">
+        <input type="checkbox" id="tightenPhrasing"${state.tightenPhrasing ? " checked" : ""} /> Tighten phrasing
+      </label>
       <div style="margin-top:6px">Seed <input type="number" id="seed" value="${state.seed}" style="width:80px" /></div>
       <div style="margin-top:4px">Chords
         <select id="chordMode" class="wiz-select" style="width:100px">

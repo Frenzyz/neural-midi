@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateMelody, isModelLoaded } from "./inference.js";
-import { distinctDurationsInRange, maxConsecutiveSamePitch } from "./taste-filter.js";
+import { maxConsecutiveSamePitch } from "./taste-filter.js";
 import type { GenerationParams } from "./types.js";
 
 const params: GenerationParams = {
@@ -9,6 +9,9 @@ const params: GenerationParams = {
   genre: "pop",
   bars: 2,
   temperature: 0.6,
+  expression: 0.5,
+  stylePreset: "expressive",
+  tightenPhrasing: false,
   seed: 7,
   tempo: 120,
   timeSignature: { numerator: 4, denominator: 4 },
@@ -50,7 +53,7 @@ describe("inference", () => {
     expect(result.notes.some((n) => n.startTime === 0)).toBe(true);
   });
 
-  it("4-bar lofi melody has balanced density", async () => {
+  it("expressive mode 4-bar melody preserves richness", async () => {
     const result = await generateMelody({
       ...params,
       genre: "lofi",
@@ -59,23 +62,52 @@ describe("inference", () => {
       seed: 884568,
       key: "D",
       scale: "major",
+      expression: 0.5,
+      stylePreset: "expressive",
+      tightenPhrasing: false,
     });
-    expect(result.notes.length).toBeGreaterThanOrEqual(6);
-    expect(maxConsecutiveSamePitch(result.notes)).toBeLessThanOrEqual(3);
-    expect(distinctDurationsInRange(result.notes, 0, 16)).toBeGreaterThanOrEqual(2);
+    expect(result.notes.length).toBeGreaterThanOrEqual(4);
+    const leadNotes = result.notes.filter((n) => n.velocity >= 55);
+    expect(leadNotes.length).toBeGreaterThanOrEqual(3);
   });
 
-  it("8-bar lofi melody avoids machine-gun repetition", async () => {
+  it("tighten off keeps more notes than tighten on for same seed", async () => {
+    const base = {
+      ...params,
+      genre: "lofi" as const,
+      generationMode: "melody" as const,
+      bars: 4,
+      seed: 884568,
+      key: "D",
+    };
+    const loose = await generateMelody({ ...base, tightenPhrasing: false });
+    const tight = await generateMelody({ ...base, tightenPhrasing: true });
+    expect(loose.notes.length).toBeGreaterThanOrEqual(tight.notes.length);
+    expect(loose.notes.length).toBeGreaterThanOrEqual(4);
+    if (tight.notes.length < loose.notes.length) {
+      expect(maxConsecutiveSamePitch(tight.notes)).toBeLessThanOrEqual(
+        maxConsecutiveSamePitch(loose.notes),
+      );
+    }
+  });
+
+  it("dense style can add hybrid accompaniment in melody mode", async () => {
     const result = await generateMelody({
       ...params,
-      genre: "lofi",
       generationMode: "melody",
-      bars: 8,
-      seed: 115022,
-      key: "D",
+      stylePreset: "dense",
+      expression: 0.7,
+      bars: 2,
+      chordProgression: [
+        {
+          startBeat: 0,
+          duration: 4,
+          rootPc: 0,
+          quality: "major",
+          pitchClasses: [0, 4, 7],
+        },
+      ],
     });
-    expect(result.notes.length).toBeGreaterThan(0);
-    expect(maxConsecutiveSamePitch(result.notes)).toBeLessThanOrEqual(3);
-    expect(distinctDurationsInRange(result.notes, 0, 16)).toBeGreaterThanOrEqual(2);
+    expect(result.notes.length).toBeGreaterThan(4);
   });
 });

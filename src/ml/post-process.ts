@@ -1,7 +1,7 @@
 import type { ChordEvent, GenerationParams, MidiNote, Scale } from "./types.js";
 import { chordAtBeat } from "./chords.js";
 import { genreEntry } from "./genre-library.js";
-import { addGhostNotes, addHarmonicFillers, applySwing, applyVelocityHumanize } from "./humanize.js";
+import { addGhostNotes, applySwing, applyVelocityHumanize } from "./humanize.js";
 import { applyLegatoOverlap, mergeVoices } from "./pattern-engine.js";
 import { mulberry32 } from "./melody-engine.js";
 import {
@@ -80,6 +80,8 @@ function shapeArticulation(notes: MidiNote[], articulation: ArticulationType): M
 export interface PostProcessOptions {
   mode?: GenerationMode;
   articulation?: ArticulationType;
+  /** 0 = no ghost notes (default expressive path). */
+  ghostNoteChance?: number;
 }
 
 export function postProcessMelody(
@@ -131,12 +133,12 @@ export function postProcessMelody(
   if (mode !== "chords") {
     const profile = genreEntry(params.genre);
     const rng = mulberry32(toNumber(params.seed, 1) + 17);
-    const scalePitches = buildScalePitches(rootPc, SCALE_INTERVALS[params.scale] ?? SCALE_INTERVALS.major, 48, 84);
     processed = applySwing(processed, profile.swing, beatsPerBar);
     processed = applyVelocityHumanize(processed, rng, profile.velocityAccent);
-    processed = addGhostNotes(processed, scalePitches, rng, profile.ghostNoteChance);
-    if (mode === "hybrid") {
-      processed = addHarmonicFillers(processed, progression, beatsPerBar, rng, 0.12);
+    const ghostChance = options.ghostNoteChance ?? 0;
+    if (ghostChance > 0) {
+      const scalePitches = buildScalePitches(rootPc, SCALE_INTERVALS[params.scale] ?? SCALE_INTERVALS.major, 48, 84);
+      processed = addGhostNotes(processed, scalePitches, rng, ghostChance);
     }
   }
 
