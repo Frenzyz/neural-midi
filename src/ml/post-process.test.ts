@@ -22,8 +22,10 @@ describe("post-process", () => {
       { pitch: 64, startTime: 0.5, duration: 0.25, velocity: 95 },
     ];
     const out = postProcessMelody(raw, base);
-    expect(out.length).toBeLessThanOrEqual(2);
-    expect(out[0]!.startTime % 0.25).toBe(0);
+    expect(out.length).toBe(3);
+    expect(out.every((n) => n.startTime % 0.25 === 0)).toBe(true);
+    const atZero = out.filter((n) => n.startTime === 0);
+    expect(atZero.length).toBe(2);
   });
 
   it("biases hybrid mode toward chord tones", () => {

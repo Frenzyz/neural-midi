@@ -1,5 +1,6 @@
-import type { ChordEvent, ChordQuality, MidiNote } from "./types.js";
+import type { ChordEvent, ChordQuality, MidiNote, Scale } from "./types.js";
 import { QUALITY_TO_INDEX } from "./types.js";
+import { NOTE_TO_PC, SCALE_INTERVALS } from "./melody-engine.js";
 
 const CHORD_TEMPLATES: { quality: ChordQuality; intervals: number[] }[] = [
   { quality: "major", intervals: [0, 4, 7] },
@@ -142,4 +143,135 @@ export function nearestChordTonePitch(
     }
   }
   return best;
+}
+
+/** Close-position voicing around `centerMidi` (default 60). */
+export function chordVoicingPitches(chord: ChordEvent, centerMidi = 60): number[] {
+  const root = chord.rootPc;
+  const pcs = chord.pitchClasses.length > 0 ? chord.pitchClasses : [root, (root + 4) % 12, (root + 7) % 12];
+  const baseOct = Math.floor(centerMidi / 12);
+  const voicing: number[] = [];
+
+  for (const pc of pcs) {
+    let pitch = baseOct * 12 + pc;
+    if (pitch < centerMidi - 6) pitch += 12;
+    if (pitch > centerMidi + 14) pitch -= 12;
+    voicing.push(pitch);
+  }
+  return [...new Set(voicing)].sort((a, b) => a - b);
+}
+
+export interface ChordVoicingOptions {
+  beatsPerBar: number;
+  bars: number;
+  progression: ChordEvent[];
+  articulation?: "lead" | "pluck";
+  rng?: () => number;
+}
+
+/** Block / rhythm chord MIDI for Chords mode. */
+export function generateChordVoicings(options: ChordVoicingOptions): MidiNote[] {
+  const { beatsPerBar, bars, progression, articulation = "lead" } = options;
+  const rng = options.rng ?? (() => 0.5);
+  const notes: MidiNote[] = [];
+
+  for (let bar = 0; bar < bars; bar++) {
+    const barStart = bar * beatsPerBar;
+    const chord = chordAtBeat(progression, barStart);
+    if (!chord) continue;
+
+    const voicing = chordVoicingPitches(chord, 58 + (bar % 2) * 2);
+    const pluck = articulation === "pluck";
+    const hits = pluck ? [0, 2] : [0];
+
+    for (const hit of hits) {
+      const startTime = barStart + hit;
+      const duration = pluck ? 0.35 : beatsPerBar - hit * 0.02;
+      const velocity = hit === 0 ? 82 : 72;
+
+      for (const pitch of voicing) {
+        notes.push({
+          pitch,
+          startTime,
+          duration: Math.max(0.25, duration),
+          velocity: Math.min(127, velocity + Math.floor(rng() * 8)),
+        });
+      }
+    }
+  }
+
+  return notes;
+}
+
+/** Chord stabs on strong beats for Hybrid mode (merged under melody). */
+export function generateHybridChordStabs(
+  progression: ChordEvent[],
+  beatsPerBar: number,
+  bars: number,
+  articulation: "lead" | "pluck" = "lead",
+): MidiNote[] {
+  const notes: MidiNote[] = [];
+  for (let bar = 0; bar < bars; bar++) {
+    const barStart = bar * beatsPerBar;
+    const chord = chordAtBeat(progression, barStart);
+    if (!chord) continue;
+
+    const voicing = chordVoicingPitches(chord, 52);
+    const stabTimes = articulation === "pluck" ? [0, 2] : [0];
+    for (const t of stabTimes) {
+      for (const pitch of voicing) {
+        notes.push({
+          pitch,
+          startTime: barStart + t,
+          duration: articulation === "pluck" ? 0.3 : 0.5,
+          velocity: 68,
+        });
+      }
+    }
+  }
+  return notes;
+}
+
+const DIATONIC_MAJOR_QUALITIES: ChordQuality[] = ["major", "minor", "minor", "major", "major", "minor", "dim"];
+const DIATONIC_MINOR_QUALITIES: ChordQuality[] = ["minor", "dim", "major", "minor", "minor", "major", "major"];
+
+function chordFromDegree(
+  rootPc: number,
+  degree: number,
+  scale: Scale,
+): Omit<ChordEvent, "startBeat" | "duration"> {
+  const intervals = SCALE_INTERVALS[scale] ?? SCALE_INTERVALS.major;
+  const qualities =
+    scale === "natural-minor" || scale === "dorian" || scale === "phrygian"
+      ? DIATONIC_MINOR_QUALITIES
+      : DIATONIC_MAJOR_QUALITIES;
+  const chordRoot = (rootPc + intervals[degree % intervals.length]!) % 12;
+  const quality = qualities[degree % qualities.length] ?? "major";
+  const tmpl = CHORD_TEMPLATES.find((t) => t.quality === quality) ?? CHORD_TEMPLATES[0]!;
+  return {
+    rootPc: chordRoot,
+    quality: tmpl.quality,
+    pitchClasses: tmpl.intervals.map((i) => (chordRoot + i) % 12),
+  };
+}
+
+/** Fallback I–V–vi–IV when no progression is detected. */
+export function defaultDiatonicProgression(
+  key: string,
+  scale: Scale,
+  bars: number,
+  beatsPerBar: number,
+): ChordEvent[] {
+  const rootPc = NOTE_TO_PC[key] ?? 0;
+  const degrees = scale === "natural-minor" ? [0, 4, 2, 5] : [0, 4, 5, 3];
+  const progression: ChordEvent[] = [];
+  for (let bar = 0; bar < bars; bar++) {
+    const degree = degrees[bar % degrees.length]!;
+    progression.push({
+      startBeat: bar * beatsPerBar,
+      duration: beatsPerBar,
+      ...chordFromDegree(rootPc, degree, scale),
+    });
+  }
+  return progression;
 }

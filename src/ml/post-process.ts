@@ -1,5 +1,6 @@
 import type { ChordEvent, GenerationParams, MidiNote, Scale } from "./types.js";
 import { chordAtBeat } from "./chords.js";
+import { applyLegatoOverlap, mergeVoices } from "./pattern-engine.js";
 import {
   NOTE_TO_PC,
   SCALE_INTERVALS,
@@ -44,27 +45,16 @@ function snapToChordOrScale(
   return Math.round(scaled * (1 - hybridBias) + nearest * hybridBias);
 }
 
-function trimOverlaps(notes: MidiNote[]): MidiNote[] {
-  const sorted = [...notes].sort((a, b) => a.startTime - b.startTime);
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const curr = sorted[i]!;
-    const next = sorted[i + 1]!;
-    const gap = next.startTime - curr.startTime;
-    if (gap > 0.05 && curr.duration > gap - 0.02) {
-      curr.duration = Math.max(0.08, gap - 0.02);
-    }
-  }
-  return sorted;
-}
-
-function dedupeGrid(notes: MidiNote[]): MidiNote[] {
-  const bySlot = new Map<string, MidiNote>();
+function dedupeIdentical(notes: MidiNote[]): MidiNote[] {
+  const seen = new Set<string>();
+  const out: MidiNote[] = [];
   for (const n of notes) {
-    const key = `${Math.round(n.startTime / GRID)}`;
-    const existing = bySlot.get(key);
-    if (!existing || n.velocity > existing.velocity) bySlot.set(key, n);
+    const key = `${Math.round(n.startTime / GRID)}_${n.pitch}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(n);
   }
-  return [...bySlot.values()].sort((a, b) => a.startTime - b.startTime);
+  return out.sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
 }
 
 function shapeArticulation(notes: MidiNote[], articulation: ArticulationType): MidiNote[] {
@@ -105,6 +95,7 @@ export function postProcessMelody(
   });
   const progression = params.chordProgression ?? [];
   const hybridBias = mode === "hybrid" ? 0.72 : mode === "chords" ? 0.88 : 0.15;
+  const allowOverlap = mode !== "chords";
 
   let processed = notes.map((n) => {
     const startTime = quantizeBeat(n.startTime, GRID);
@@ -116,7 +107,7 @@ export function postProcessMelody(
       chord,
       rootPc,
       params.scale,
-      bias,
+      mode === "chords" ? 0 : bias,
     );
     return {
       pitch,
@@ -126,12 +117,19 @@ export function postProcessMelody(
     };
   });
 
-  processed = dedupeGrid(processed);
-  processed = trimOverlaps(processed);
+  processed = dedupeIdentical(processed);
+
+  if (allowOverlap) {
+    processed = applyLegatoOverlap(processed, articulation === "pluck" ? 0.04 : 0.1);
+  }
+
   processed = shapeArticulation(processed, articulation);
 
-  if (processed.length > 1 && mode !== "chords") {
-    const last = processed[processed.length - 1]!;
+  if (processed.length > 1 && mode === "melody") {
+    const lead = processed
+      .filter((n) => n.velocity >= 60)
+      .sort((a, b) => a.startTime - b.startTime);
+    const last = lead[lead.length - 1] ?? processed[processed.length - 1]!;
     const intervals = SCALE_INTERVALS[params.scale] ?? SCALE_INTERVALS.major;
     const tonicPc = (rootPc + intervals[0]!) % 12;
     const octave = Math.round(last.pitch / 12);
@@ -140,4 +138,16 @@ export function postProcessMelody(
   }
 
   return processed;
+}
+
+/** Merge melody with chord stabs, keeping both voices. */
+export function postProcessHybrid(
+  melody: MidiNote[],
+  chordStabs: MidiNote[],
+  params: GenerationParams,
+  articulation: ArticulationType = "lead",
+): MidiNote[] {
+  const processedMelody = postProcessMelody(melody, params, { mode: "melody", articulation });
+  const processedChords = postProcessMelody(chordStabs, params, { mode: "chords", articulation });
+  return mergeVoices(processedMelody, processedChords);
 }

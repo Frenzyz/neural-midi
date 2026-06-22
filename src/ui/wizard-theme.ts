@@ -65,16 +65,16 @@ export const WIZARD_CSS = `
   .gen-logo {
     width: 88px; height: 88px; border-radius: 50%;
     border: none; padding: 0; cursor: pointer;
-    background: radial-gradient(circle at 38% 32%, #4a6fad 0%, var(--dusk-blue) 55%, #2a4570 100%);
-    box-shadow: 0 0 0 3px var(--playhead-glow), 0 6px 20px rgba(0,0,0,0.35);
+    background: transparent;
+    box-shadow: 0 4px 18px rgba(48, 41, 47, 0.55);
     display: flex; align-items: center; justify-content: center;
     transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
   .gen-logo:hover {
     transform: scale(1.04);
-    box-shadow: 0 0 0 4px var(--playhead-glow), 0 8px 24px rgba(0,0,0,0.4);
+    box-shadow: 0 6px 22px rgba(48, 41, 47, 0.65);
   }
-  .gen-logo svg { width: 52px; height: 52px; }
+  .gen-logo svg { width: 88px; height: 88px; display: block; }
   .wiz-meta { text-align: right; font-size: 10px; color: var(--text-dim); }
   .wiz-meta input[type="range"] { accent-color: var(--dusty-grape); }
   .wiz-meta input[type="number"] {
@@ -143,13 +143,6 @@ export const WIZARD_CSS = `
     color: var(--text-primary);
   }
 `;
-
-export const NM_LOGO_SVG = `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <path d="M8 40 C14 28, 20 22, 32 22 C44 22, 50 28, 56 40" stroke="rgba(255,255,255,0.35)" stroke-width="1.5" stroke-linecap="round"/>
-  <path d="M10 38 C16 30, 22 26, 32 26 C42 26, 48 30, 54 38" stroke="rgba(255,255,255,0.55)" stroke-width="1.2" stroke-linecap="round"/>
-  <text x="32" y="36" text-anchor="middle" fill="#f0edf8" font-family="Helvetica Neue, sans-serif" font-size="18" font-weight="300" letter-spacing="1">NM</text>
-  <circle cx="32" cy="32" r="30" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
-</svg>`;
 
 export function modalDialogUrl(html: string): string {
   return `data:text/html,${encodeURIComponent(html)}`;

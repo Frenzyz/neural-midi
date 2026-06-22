@@ -1,5 +1,6 @@
 import { float32Vector } from "./onnx-tensors.js";
 import { chordAtBeat } from "./chords.js";
+import { addHarmonyLayer, applyLegatoOverlap, mergeVoices } from "./pattern-engine.js";
 import { mulberry32, quantizeBeat } from "./melody-engine.js";
 import { runMelodyStep, getHiddenStateSize, getOnnxModelVersion, isOnnxReady } from "./onnx-runtime.js";
 import {
@@ -11,8 +12,6 @@ import {
 } from "./tokenizer.js";
 import type { GenerationParams, GenerationResult, MidiNote } from "./types.js";
 import { resolveTimeSignature, toNumber } from "../util/coerce.js";
-
-const ONNX_VERSION = "onnx-v2.0";
 
 function sampleToken(logits: Float32Array, temperature: number, rng: () => number): number {
   const scaled = new Float32Array(VOCAB_SIZE);
@@ -98,7 +97,7 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
     notes.push({
       pitch,
       startTime: quantizeBeat(beat),
-      duration: grid,
+      duration: grid * 1.25,
       velocity: 72 + Math.floor(rng() * 30),
     });
     lastPitch = pitch;
@@ -113,8 +112,22 @@ export async function generateOnnxMelody(params: GenerationParams): Promise<Gene
 
   if (deduped.length === 0) return null;
 
+  const mode = params.generationMode ?? (progression.length ? "hybrid" : "melody");
+  let enriched = applyLegatoOverlap(deduped, 0.08);
+
+  if (mode !== "chords" && progression.length > 0) {
+    const extraLayers: MidiNote[][] = [];
+    for (const n of deduped) {
+      const chord = chordAtBeat(progression, n.startTime);
+      if (!chord) continue;
+      const extra = addHarmonyLayer([n], chord.pitchClasses, rng, mode === "hybrid" ? 0.4 : 0.55);
+      if (extra.length > 1) extraLayers.push(extra.slice(1));
+    }
+    enriched = mergeVoices(enriched, ...extraLayers);
+  }
+
   return {
-    notes: deduped,
+    notes: enriched,
     modelVersion: getOnnxModelVersion(),
     usedStub: false,
   };

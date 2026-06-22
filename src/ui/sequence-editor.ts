@@ -1,6 +1,7 @@
 import { SCALE_INTERVALS, NOTE_TO_PC } from "../ml/melody-engine.js";
 import type { SequenceState } from "../ml/sequence.js";
-import { NM_LOGO_SVG, WIZARD_CSS } from "./wizard-theme.js";
+import { NM_LOGO_SVG } from "./nm-logo.js";
+import { WIZARD_CSS } from "./wizard-theme.js";
 
 const KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const SCALES: [string, string][] = [

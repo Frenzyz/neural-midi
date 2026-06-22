@@ -38,4 +38,14 @@ describe("inference", () => {
     });
     expect(result.notes.length).toBeGreaterThan(0);
   });
+
+  it("generates chord-only voicings in chords mode", async () => {
+    const result = await generateMelody({
+      ...params,
+      generationMode: "chords",
+      bars: 2,
+    });
+    expect(result.notes.length).toBeGreaterThanOrEqual(6);
+    expect(result.notes.some((n) => n.startTime === 0)).toBe(true);
+  });
 });

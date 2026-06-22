@@ -74,13 +74,15 @@ describe("generateStubMelody", () => {
     expect(result.notes.length).toBeGreaterThan(0);
   });
 
-  it("does not overlap notes (monophonic)", () => {
-    const result = generateStubMelody(baseParams);
-    for (let i = 1; i < result.notes.length; i++) {
-      const prev = result.notes[i - 1]!;
-      const curr = result.notes[i]!;
-      expect(curr.startTime).toBeGreaterThanOrEqual(prev.startTime);
-      expect(curr.startTime).toBeGreaterThanOrEqual(prev.startTime + prev.duration - 0.01);
-    }
+  it("allows polyphonic overlap in melody output", () => {
+    const result = generateStubMelody({ ...baseParams, generationMode: "melody" });
+    const atZero = result.notes.filter((n) => n.startTime === 0);
+    const hasOverlap = result.notes.some((a, i) =>
+      result.notes.some((b, j) =>
+        i !== j && Math.abs(a.startTime - b.startTime) < 0.01,
+      ),
+    );
+    expect(result.notes.length).toBeGreaterThan(4);
+    expect(hasOverlap || atZero.length >= 1).toBe(true);
   });
 });
