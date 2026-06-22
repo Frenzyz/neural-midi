@@ -1,0 +1,7 @@
+{
+  "name": "Neural Midi",
+  "author": "Frenzyz",
+  "entry": "dist/extension.js",
+  "version": "0.1.0",
+  "minimumApiVersion": "1.0.0"
+}
