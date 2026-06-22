@@ -6,8 +6,7 @@ import {
   generateChordVoicings,
   generateHybridAccompaniment,
 } from "./chords.js";
-import { boostDensityIfSparse } from "./density.js";
-import { applyTasteFilter } from "./taste-filter.js";
+import { applyTasteFilter, ensureMinimumPhraseDensity } from "./taste-filter.js";
 import { mulberry32 } from "./melody-engine.js";
 import { postProcessHybrid, postProcessMelody } from "./post-process.js";
 import { addHarmonicStacks } from "./pattern-engine.js";
@@ -41,6 +40,11 @@ function progressionForParams(params: GenerationParams): import("./types.js").Ch
   });
   const bars = Math.max(1, toNumber(params.bars, 4));
   return defaultDiatonicProgression(params.key, params.scale, bars, beatsPerBar, params.genre);
+}
+
+function logNoteCount(stage: string, notes: MidiNote[]): void {
+  const lead = notes.filter((n) => n.velocity >= 55).length;
+  console.log(`[Neural Midi] ${stage}: ${notes.length} notes (${lead} lead)`);
 }
 
 export async function generateMelody(params: GenerationParams): Promise<GenerationResult> {
@@ -88,6 +92,7 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
     mode: "melody",
     articulation,
   });
+  logNoteCount("post-process", notes);
 
   const rng = mulberry32(toNumber(params.seed, 1) + 31);
   if (progression.length > 0 && mode !== "melody") {
@@ -105,8 +110,6 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
     notes = postProcessHybrid(notes, accompaniment, { ...params, chordProgression: progression }, articulation);
   }
 
-  notes = boostDensityIfSparse(notes, progression, beatsPerBar, bars, mode, toNumber(params.seed, 1));
-
   notes = applyTasteFilter(notes, {
     mode,
     beatsPerBar,
@@ -114,6 +117,18 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
     seed: toNumber(params.seed, 1),
     genre: params.genre,
   });
+  logNoteCount("taste-filter", notes);
+
+  notes = ensureMinimumPhraseDensity(notes, {
+    mode,
+    beatsPerBar,
+    bars,
+    seed: toNumber(params.seed, 1),
+    genre: params.genre,
+    key: params.key,
+    scale: params.scale,
+  });
+  logNoteCount("min-density", notes);
 
   return { ...result, notes };
 }

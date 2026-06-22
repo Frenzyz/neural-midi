@@ -31,7 +31,7 @@ describe("density helpers", () => {
     expect(meetsDensityTarget(sparse, 4, 4, "hybrid")).toBe(false);
   });
 
-  it("boosts sparse output toward hybrid density", () => {
+  it("boosts sparse hybrid output toward hybrid density", () => {
     const boosted = boostDensityIfSparse(sparse, progression, 4, 4, "hybrid", 42);
     expect(boosted.length).toBeGreaterThan(sparse.length);
     expect(averagePolyphony(boosted, 16)).toBeGreaterThan(averagePolyphony(sparse, 16));

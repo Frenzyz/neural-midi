@@ -50,6 +50,21 @@ describe("inference", () => {
     expect(result.notes.some((n) => n.startTime === 0)).toBe(true);
   });
 
+  it("4-bar lofi melody has balanced density", async () => {
+    const result = await generateMelody({
+      ...params,
+      genre: "lofi",
+      generationMode: "melody",
+      bars: 4,
+      seed: 884568,
+      key: "D",
+      scale: "major",
+    });
+    expect(result.notes.length).toBeGreaterThanOrEqual(6);
+    expect(maxConsecutiveSamePitch(result.notes)).toBeLessThanOrEqual(3);
+    expect(distinctDurationsInRange(result.notes, 0, 16)).toBeGreaterThanOrEqual(2);
+  });
+
   it("8-bar lofi melody avoids machine-gun repetition", async () => {
     const result = await generateMelody({
       ...params,

@@ -1,7 +1,16 @@
-import type { ChordEvent, MidiNote } from "./types.js";
+import type { ChordEvent, Genre, MidiNote, Scale } from "./types.js";
 import { chordAtBeat } from "./chords.js";
-import { mulberry32, quantizeBeat } from "./melody-engine.js";
-import { GRID } from "./pattern-engine.js";
+import {
+  buildScalePitches,
+  mulberry32,
+  NOTE_TO_PC,
+  quantizeBeat,
+  SCALE_INTERVALS,
+} from "./melody-engine.js";
+import { fillPhraseGaps, GRID } from "./pattern-engine.js";
+import { minMelodyNotes, minNotesPerBar } from "./taste-filter.js";
+
+const SPARSE_GENRES: Set<Genre> = new Set(["lofi", "ambient", "rnb"]);
 
 /** Average note count per bar (polyphony-aware). */
 export function notesPerBar(notes: MidiNote[], beatsPerBar: number, bars: number): number {
@@ -31,7 +40,7 @@ export interface DensityTarget {
 }
 
 export const DENSITY_TARGETS: Record<string, DensityTarget> = {
-  melody: { minNotesPerBar: 2, minAvgPolyphony: 1.0 },
+  melody: { minNotesPerBar: 1.5, minAvgPolyphony: 1.0 },
   hybrid: { minNotesPerBar: 5, minAvgPolyphony: 1.5 },
   chords: { minNotesPerBar: 4, minAvgPolyphony: 2.0 },
 };
@@ -49,6 +58,27 @@ export function meetsDensityTarget(
   );
 }
 
+/** Gentle melody fill using phrase gaps when below floor (not machine-gun 16ths). */
+export function boostMelodyDensityGently(
+  notes: MidiNote[],
+  beatsPerBar: number,
+  bars: number,
+  key: string,
+  scale: Scale,
+  genre: Genre | undefined,
+  seed: number,
+): MidiNote[] {
+  const minTotal = minMelodyNotes(bars, genre);
+  const leadCount = notes.filter((n) => n.velocity >= 55).length;
+  if (leadCount >= minTotal) return notes;
+
+  const rootPc = NOTE_TO_PC[key] ?? 0;
+  const intervals = SCALE_INTERVALS[scale] ?? SCALE_INTERVALS.major;
+  const pitches = buildScalePitches(rootPc, intervals, 55, 80);
+  const sparse = genre !== undefined && SPARSE_GENRES.has(genre);
+  return fillPhraseGaps(notes, pitches, beatsPerBar, bars, minNotesPerBar(genre), mulberry32(seed + 99), sparse);
+}
+
 /** Boost density by duplicating chord-tone stacks when output is too sparse. */
 export function boostDensityIfSparse(
   notes: MidiNote[],
@@ -57,9 +87,13 @@ export function boostDensityIfSparse(
   bars: number,
   mode: keyof typeof DENSITY_TARGETS,
   seed: number,
+  key = "C",
+  scale: Scale = "major",
+  genre?: Genre,
 ): MidiNote[] {
-  // Melody quality is handled by taste-filter; never machine-gun-fill the lead.
-  if (mode === "melody") return notes;
+  if (mode === "melody") {
+    return boostMelodyDensityGently(notes, beatsPerBar, bars, key, scale, genre, seed);
+  }
   if (meetsDensityTarget(notes, beatsPerBar, bars, mode)) return notes;
   const rng = mulberry32(seed + 99);
   const extras: MidiNote[] = [];

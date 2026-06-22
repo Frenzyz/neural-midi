@@ -1,6 +1,12 @@
-import type { Genre, MidiNote } from "./types.js";
-import { mulberry32, quantizeBeat } from "./melody-engine.js";
-import { GRID } from "./pattern-engine.js";
+import type { Genre, MidiNote, Scale } from "./types.js";
+import {
+  NOTE_TO_PC,
+  SCALE_INTERVALS,
+  buildScalePitches,
+  mulberry32,
+  quantizeBeat,
+} from "./melody-engine.js";
+import { fillPhraseGaps, GRID } from "./pattern-engine.js";
 
 export type TasteMode = "melody" | "hybrid" | "chords";
 
@@ -10,18 +16,37 @@ export interface TasteFilterOptions {
   bars: number;
   seed?: number;
   genre?: Genre;
+  key?: string;
+  scale?: Scale;
+}
+
+export interface MinDensityOptions extends TasteFilterOptions {
+  key: string;
+  scale: Scale;
 }
 
 const DURATION_WEIGHTS = [
-  { duration: 0.5, weight: 0.14 },
-  { duration: 0.75, weight: 0.22 },
+  { duration: 0.5, weight: 0.16 },
+  { duration: 0.75, weight: 0.24 },
   { duration: 1.0, weight: 0.26 },
   { duration: 1.25, weight: 0.14 },
-  { duration: 1.5, weight: 0.14 },
-  { duration: 2.0, weight: 0.1 },
+  { duration: 1.5, weight: 0.12 },
+  { duration: 2.0, weight: 0.08 },
 ];
 
 const SPARSE_GENRES: Set<Genre> = new Set(["lofi", "ambient", "rnb"]);
+
+const LEAD_VELOCITY_MIN = 55;
+
+/** Target note counts: melody 1.5–3/bar (6–12 per 4 bars). */
+export function minMelodyNotes(bars: number, genre?: Genre): number {
+  const perBar = genre !== undefined && SPARSE_GENRES.has(genre) ? 1.5 : 2;
+  return Math.max(6, Math.round(bars * perBar));
+}
+
+export function minNotesPerBar(genre?: Genre): number {
+  return genre !== undefined && SPARSE_GENRES.has(genre) ? 1.5 : 2;
+}
 
 function pickWeightedDuration(rng: () => number): number {
   const r = rng();
@@ -33,8 +58,12 @@ function pickWeightedDuration(rng: () => number): number {
   return 1.0;
 }
 
+function leadNotes(notes: MidiNote[]): MidiNote[] {
+  return notes.filter((n) => n.velocity >= LEAD_VELOCITY_MIN);
+}
+
 /** Longest run of consecutive same-pitch attacks on the lead voice (time-ordered). */
-export function maxConsecutiveSamePitch(notes: MidiNote[], leadVelocityMin = 55): number {
+export function maxConsecutiveSamePitch(notes: MidiNote[], leadVelocityMin = LEAD_VELOCITY_MIN): number {
   const lead = [...notes]
     .filter((n) => n.velocity >= leadVelocityMin)
     .sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
@@ -68,7 +97,7 @@ export function distinctDurationsInRange(
   return durations.size;
 }
 
-/** Merge machine-gun 16th runs on a single pitch into one longer note. */
+/** Merge machine-gun 16th runs on a single pitch into one longer note (5+ only). */
 function collapsePerPitchRuns(
   notes: MidiNote[],
   maxGridHits: number,
@@ -125,9 +154,8 @@ function limitLeadConsecutiveSamePitch(
   maxConsecutive: number,
   minSpacing: number,
 ): MidiNote[] {
-  const leadMin = 55;
-  const lead = notes.filter((n) => n.velocity >= leadMin);
-  const harmony = notes.filter((n) => n.velocity < leadMin);
+  const lead = notes.filter((n) => n.velocity >= LEAD_VELOCITY_MIN);
+  const harmony = notes.filter((n) => n.velocity < LEAD_VELOCITY_MIN);
   const sorted = [...lead].sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
 
   const keptLead: MidiNote[] = [];
@@ -151,10 +179,10 @@ function limitLeadConsecutiveSamePitch(
   return [...keptLead, ...harmony].sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
 }
 
-/** Reassign short uniform durations with a weighted longer palette. */
+/** Reassign only very short uniform durations with a weighted longer palette. */
 function varyDurations(notes: MidiNote[], rng: () => number, sparse: boolean): MidiNote[] {
   return notes.map((n) => {
-    if (n.duration > 0.4 && rng() > 0.35) return n;
+    if (n.duration > GRID * 1.1 && rng() > 0.25) return n;
     const base = pickWeightedDuration(rng);
     const duration = sparse ? Math.max(base, 0.75) : base;
     return {
@@ -164,32 +192,34 @@ function varyDurations(notes: MidiNote[], rng: () => number, sparse: boolean): M
   });
 }
 
-/** Thin weakest notes per bar to leave melodic breathing room. */
+/** Thin weakest notes per bar — capped removal, never below min notes/bar. */
 function injectMelodicRests(
   notes: MidiNote[],
   beatsPerBar: number,
   bars: number,
-  targetRestFraction: number,
+  maxRestFraction: number,
+  minPerBar: number,
   rng: () => number,
 ): MidiNote[] {
-  const leadMin = 55;
-  const totalBeats = beatsPerBar * bars;
-  let occupied = 0;
-  for (const n of notes) {
-    if (n.velocity >= leadMin) occupied += Math.min(n.duration, GRID * 2);
-  }
-  const currentDensity = occupied / totalBeats;
-  const targetDensity = 1 - targetRestFraction;
-  if (currentDensity <= targetDensity) return notes;
-
-  const sorted = [...notes].sort((a, b) => a.velocity - b.velocity || a.startTime - b.startTime);
-  const dropCount = Math.ceil((currentDensity - targetDensity) * totalBeats / GRID);
   const dropKeys = new Set<string>();
+  const maxDropsPerBar = Math.max(1, Math.floor(beatsPerBar * maxRestFraction / GRID));
 
-  for (let i = 0; i < Math.min(dropCount, sorted.length - 2); i++) {
-    const n = sorted[i]!;
-    if (n.velocity >= leadMin && rng() < 0.7) {
+  for (let bar = 0; bar < bars; bar++) {
+    const barStart = bar * beatsPerBar;
+    const barEnd = barStart + beatsPerBar;
+    const inBar = notes.filter(
+      (n) => n.velocity >= LEAD_VELOCITY_MIN && n.startTime >= barStart && n.startTime < barEnd,
+    );
+    const canDrop = Math.max(0, inBar.length - Math.ceil(minPerBar));
+    if (canDrop === 0) continue;
+
+    const sorted = [...inBar].sort((a, b) => a.velocity - b.velocity || a.startTime - b.startTime);
+    let dropped = 0;
+    for (const n of sorted) {
+      if (dropped >= Math.min(maxDropsPerBar, canDrop)) break;
+      if (rng() > 0.55) continue;
       dropKeys.add(`${Math.round(n.startTime / GRID)}_${n.pitch}`);
+      dropped++;
     }
   }
 
@@ -198,8 +228,8 @@ function injectMelodicRests(
 }
 
 /**
- * Musical quality pass: anti-repeat, duration variety, rest space.
- * Run after density boosts and humanization.
+ * Musical quality pass: anti-repeat, duration variety, light rest space.
+ * Does not enforce minimum density — use ensureMinimumPhraseDensity after.
  */
 export function applyTasteFilter(notes: MidiNote[], options: TasteFilterOptions): MidiNote[] {
   if (notes.length === 0) return notes;
@@ -211,21 +241,46 @@ export function applyTasteFilter(notes: MidiNote[], options: TasteFilterOptions)
   let result = [...notes];
 
   if (mode === "melody" || mode === "hybrid") {
-    const maxGridHits = sparse ? 2 : 3;
-    result = collapsePerPitchRuns(result, maxGridHits, rng);
-    result = limitLeadConsecutiveSamePitch(
-      result,
-      sparse ? 2 : 3,
-      sparse ? 0.5 : 0.25,
-    );
+    result = collapsePerPitchRuns(result, 4, rng);
+    result = limitLeadConsecutiveSamePitch(result, 3, sparse ? 0.25 : 0.25);
 
     if (mode === "melody") {
-      const restTarget = sparse ? 0.3 : 0.2;
-      result = injectMelodicRests(result, beatsPerBar, bars, restTarget, rng);
+      const restCap = sparse ? 0.12 : 0.15;
+      result = injectMelodicRests(result, beatsPerBar, bars, restCap, minNotesPerBar(genre), rng);
     }
 
     result = varyDurations(result, rng, sparse);
   }
 
   return result.sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
+}
+
+/**
+ * Floor guard: if output is too sparse after taste filter, fill gaps with phrase motifs.
+ */
+export function ensureMinimumPhraseDensity(
+  notes: MidiNote[],
+  options: MinDensityOptions,
+): MidiNote[] {
+  const { mode, beatsPerBar, bars, seed = 1, genre, key, scale } = options;
+  if (mode === "chords") return notes;
+
+  const minTotal = minMelodyNotes(bars, genre);
+  if (leadNotes(notes).length >= minTotal) return notes;
+
+  const rootPc = NOTE_TO_PC[key] ?? 0;
+  const intervals = SCALE_INTERVALS[scale] ?? SCALE_INTERVALS.major;
+  const pitches = buildScalePitches(rootPc, intervals, 55, 80);
+  const sparse = genre !== undefined && SPARSE_GENRES.has(genre);
+  const rng = mulberry32(seed + 601);
+
+  return fillPhraseGaps(
+    notes,
+    pitches,
+    beatsPerBar,
+    bars,
+    minNotesPerBar(genre),
+    rng,
+    sparse,
+  );
 }

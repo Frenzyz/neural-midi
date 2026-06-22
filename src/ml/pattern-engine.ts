@@ -283,3 +283,61 @@ export function mergeVoices(...layers: MidiNote[][]): MidiNote[] {
   }
   return merged.sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
 }
+
+/** Tastefully fill sparse bars with stepwise motion and longer durations (not machine-gun). */
+export function fillPhraseGaps(
+  notes: MidiNote[],
+  pitches: number[],
+  beatsPerBar: number,
+  bars: number,
+  minNotesPerBar: number,
+  rng: () => number,
+  sparse = false,
+): MidiNote[] {
+  if (pitches.length === 0) return notes;
+
+  const leadMin = 55;
+  const durationPool = sparse ? [0.75, 1.0, 1.25, 1.5, 2.0] : [0.5, 0.75, 1.0, 1.25, 1.5];
+  const slotPool = sparse
+    ? [0, 1.25, 2.5, 3.0]
+    : [0, 0.75, 1.5, 2.25, 3.0];
+
+  const result = [...notes];
+
+  for (let bar = 0; bar < bars; bar++) {
+    const barStart = bar * beatsPerBar;
+    const barEnd = barStart + beatsPerBar;
+    const inBar = result.filter(
+      (n) => n.velocity >= leadMin && n.startTime >= barStart - 0.01 && n.startTime < barEnd,
+    );
+    const target = Math.ceil(minNotesPerBar);
+    if (inBar.length >= target) continue;
+
+    const needed = target - inBar.length;
+    const sortedBar = [...inBar].sort((a, b) => a.startTime - b.startTime);
+    let lastPitch = sortedBar[sortedBar.length - 1]?.pitch ?? pitches[Math.floor(pitches.length / 2)]!;
+    let lastIdx = Math.max(0, pitches.indexOf(lastPitch));
+
+    for (let i = 0; i < needed; i++) {
+      const slot = slotPool[i % slotPool.length]!;
+      const t = quantizeBeat(barStart + slot, GRID);
+      const occupied = result.some(
+        (n) => n.velocity >= leadMin && Math.abs(n.startTime - t) < GRID * 0.9,
+      );
+      if (occupied) continue;
+
+      const step = rng() < 0.65 ? (rng() < 0.5 ? 1 : -1) : rng() < 0.5 ? 2 : -2;
+      lastIdx = Math.max(0, Math.min(pitches.length - 1, lastIdx + step));
+      lastPitch = pitches[lastIdx]!;
+
+      result.push({
+        pitch: lastPitch,
+        startTime: t,
+        duration: durationPool[Math.floor(rng() * durationPool.length)]!,
+        velocity: 70 + Math.floor(rng() * 16),
+      });
+    }
+  }
+
+  return mergeVoices(result);
+}
