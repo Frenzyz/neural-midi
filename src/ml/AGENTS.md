@@ -14,6 +14,7 @@ Melody generation subsystem. ONNX-first with silent fallback to the rule-based s
 - `tokenizer.ts` — Vocab and one-hot encodings (must match Python training)
 - `chords.ts` — Chord detection from polyphonic MIDI
 - `session-chords.ts` — Live session traversal → `ChordEvent[]` progression
+- `session-analysis.ts` — On-demand project snapshot: key/scale (K–S + Live scale), rhythm, genre, chords
 
 ## Key Abstractions
 

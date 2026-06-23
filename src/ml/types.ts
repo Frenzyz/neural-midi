@@ -69,6 +69,8 @@ export interface GenerationParams {
   rigidity?: number;
   /** History index for variety rotation (set by inference). */
   generationIndex?: number;
+  /** Project swing override from session analysis (0–0.25). */
+  swingAmount?: number;
 }
 
 export interface GenerationResult {

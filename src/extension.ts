@@ -8,6 +8,7 @@ import {
 import { generateMelody, loadModel, setLazyStorageDir } from "./ml/inference.js";
 import { chordLabelsPerBar } from "./ml/chords.js";
 import { resolveChordProgression } from "./ml/session-chords.js";
+import { analyzeProject, applyProjectAnalysisToState } from "./ml/session-analysis.js";
 import {
   mergeRegionNotes,
   normalizeSelection,
@@ -75,6 +76,7 @@ function editorStateFromDialog(dialog: EditorResult, prev: SequenceState): Seque
     regionStylePreset: dialog.regionStylePreset,
     regionTightenPhrasing: dialog.regionTightenPhrasing,
     regionSeed: dialog.regionSeed,
+    matchProject: dialog.matchProject,
   };
 }
 
@@ -87,6 +89,8 @@ function buildGenerationParams(
   regionEnd: number,
   fullGenerate: boolean,
   generationIndex: number,
+  matchProject: boolean,
+  projectSwingAmount?: number,
 ): GenerationParams {
   const beatsPerBar = timeSignature.numerator || 4;
   const useRegion = !fullGenerate && dialog.useRegionSettings;
@@ -107,6 +111,7 @@ function buildGenerationParams(
     generationMode: dialog.generationMode,
     articulation: dialog.articulation,
     generationIndex,
+    swingAmount: matchProject ? projectSwingAmount : undefined,
   };
 }
 
@@ -115,12 +120,14 @@ async function runSequenceEditor(
   initial: SequenceState,
   generate: (
     dialog: EditorResult,
+    state: SequenceState,
     regionStart: number,
     regionEnd: number,
     fullGenerate: boolean,
     seed: number,
     generationIndex: number,
   ) => Promise<MidiNote[]>,
+  onReanalyze?: (state: SequenceState) => SequenceState,
 ): Promise<MidiNote[] | null> {
   let state = initial;
   let history: GenerationHistoryState = {
@@ -165,6 +172,11 @@ async function runSequenceEditor(
       continue;
     }
 
+    if (dialog.action === "reanalyze") {
+      if (onReanalyze) state = onReanalyze(state);
+      continue;
+    }
+
     if (dialog.action === "generate_all" || dialog.action === "generate_selection") {
       const beatsPerBar = state.timeSignature.numerator || 4;
       const maxBeat = state.bars * beatsPerBar;
@@ -188,6 +200,7 @@ async function runSequenceEditor(
       };
       const generated = await generate(
         dialog,
+        state,
         regionStart,
         regionEnd,
         fullGenerate,
@@ -229,24 +242,27 @@ export function activate(activation: ActivationContext): void {
       const tempo = toNumber(song.tempo, 120);
       const timeSignature = resolveTimeSignature(song.scenes[0]);
       const beatsPerBar = timeSignature.numerator || 4;
+      const bars = 4;
 
-      const initialProgression = resolveChordProgression(
-        song,
-        clip,
-        args,
-        "same-track",
-        4,
-      );
+      const projectAnalysis = analyzeProject(song, clip, {
+        bars,
+        excludeClipHandle: args,
+      });
+
+      const initialProgression =
+        projectAnalysis.chordProgression.length > 0
+          ? projectAnalysis.chordProgression
+          : resolveChordProgression(song, clip, args, "same-track", bars);
 
       const initialNotes = toMidiNotes(clip.notes);
       const history = createHistory(initialNotes);
 
-      const initialState: SequenceState = {
+      let initialState: SequenceState = {
         notes: initialNotes,
         key: "C",
         scale: "major",
         genre: "pop",
-        bars: 4,
+        bars,
         temperature: 0.7,
         expression: 0.3,
         stylePreset: "expressive",
@@ -255,7 +271,7 @@ export function activate(activation: ActivationContext): void {
         chordMode: "same-track",
         generationMode: initialProgression.length > 0 ? "hybrid" : "melody",
         articulation: "lead",
-        chordLabels: chordLabelsPerBar(initialProgression, 4, beatsPerBar),
+        chordLabels: chordLabelsPerBar(initialProgression, bars, beatsPerBar),
         generationHistory: history.snapshots,
         historyIndex: history.index,
         tempo,
@@ -271,22 +287,38 @@ export function activate(activation: ActivationContext): void {
         regionStylePreset: "expressive",
         regionTightenPhrasing: false,
         regionSeed: Math.floor(Math.random() * 1_000_000),
+        matchProject: true,
+        projectConfidence: projectAnalysis.confidence,
+        projectSource: projectAnalysis.source,
+        analyzedClipCount: projectAnalysis.analyzedClipCount,
+        projectSwingAmount: projectAnalysis.swingAmount,
+        projectChordProgression: projectAnalysis.chordProgression,
       };
+
+      initialState = applyProjectAnalysisToState(initialState, projectAnalysis, true);
+      initialState.chordLabels = chordLabelsPerBar(initialProgression, bars, beatsPerBar);
 
       const notes = await runSequenceEditor(
         (url) => ext.ui.showModalDialog(url, 920, 640),
         initialState,
-        async (dialog, regionStart, regionEnd, fullGenerate, seed, generationIndex) => {
-          const bars = fullGenerate
+        async (dialog, editorState, regionStart, regionEnd, fullGenerate, seed, generationIndex) => {
+          const genBars = fullGenerate
             ? dialog.bars
             : Math.ceil((regionEnd - regionStart) / beatsPerBar) || 1;
-          const chordProgression = resolveChordProgression(
+
+          const sessionChords = resolveChordProgression(
             song,
             clip,
             args,
             dialog.chordMode,
-            bars,
+            genBars,
           );
+          const useProjectChords =
+            dialog.matchProject && editorState.projectChordProgression?.length;
+          const chordProgression = useProjectChords
+            ? editorState.projectChordProgression!
+            : sessionChords;
+
           const params = {
             ...buildGenerationParams(
               dialog,
@@ -297,12 +329,43 @@ export function activate(activation: ActivationContext): void {
               regionEnd,
               fullGenerate,
               generationIndex,
+              dialog.matchProject,
+              editorState.projectSwingAmount,
             ),
             seed,
           };
           const result = await generateMelody(params);
           const regionBeats = regionEnd - regionStart;
           return result.notes.filter((n) => n.startTime < regionBeats);
+        },
+        (editorState) => {
+          const analysis = analyzeProject(song, clip, {
+            bars: editorState.bars,
+            excludeClipHandle: args,
+          });
+          const fallbackProgression = resolveChordProgression(
+            song,
+            clip,
+            args,
+            editorState.chordMode,
+            editorState.bars,
+          );
+          const progression =
+            analysis.chordProgression.length > 0 ? analysis.chordProgression : fallbackProgression;
+          let next: SequenceState = {
+            ...editorState,
+            projectConfidence: analysis.confidence,
+            projectSource: analysis.source,
+            analyzedClipCount: analysis.analyzedClipCount,
+            projectSwingAmount: analysis.swingAmount,
+            projectChordProgression: analysis.chordProgression,
+            chordLabels: chordLabelsPerBar(progression, editorState.bars, beatsPerBar),
+          };
+          next = applyProjectAnalysisToState(next, analysis, editorState.matchProject);
+          console.log(
+            `[Neural Midi] Re-analyzed project: ${analysis.key} ${analysis.scale} (${analysis.source}, ${analysis.analyzedClipCount} clips)`,
+          );
+          return next;
         },
       );
 

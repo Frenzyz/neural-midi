@@ -378,7 +378,8 @@ export function postProcessMelody(
   if (mode !== "chords") {
     const profile = genreEntry(params.genre);
     const rng = mulberry32(toNumber(params.seed, 1) + 17);
-    processed = applySwing(processed, profile.swing, beatsPerBar);
+    const swing = params.swingAmount ?? profile.swing;
+    processed = applySwing(processed, swing, beatsPerBar);
     processed = applyVelocityHumanize(processed, rng, profile.velocityAccent);
     const ghostChance = options.ghostNoteChance ?? 0;
     if (ghostChance > 0) {
