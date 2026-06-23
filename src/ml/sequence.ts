@@ -1,4 +1,14 @@
-import type { ArticulationType, ChordMode, GenerationMode, Genre, MidiNote, Scale, StylePreset } from "./types.js";
+import type {
+  ArticulationType,
+  ChordMode,
+  ChordEvent,
+  GenerationMode,
+  Genre,
+  MidiNote,
+  Scale,
+  StylePreset,
+} from "./types.js";
+import type { ProjectAnalysisSource } from "./session-analysis.js";
 
 export interface SequenceState {
   notes: MidiNote[];
@@ -30,6 +40,12 @@ export interface SequenceState {
   regionStylePreset: StylePreset;
   regionTightenPhrasing: boolean;
   regionSeed: number;
+  matchProject: boolean;
+  projectConfidence?: number;
+  projectSource?: ProjectAnalysisSource;
+  analyzedClipCount?: number;
+  projectSwingAmount?: number;
+  projectChordProgression?: ChordEvent[];
 }
 
 export interface PreviewEvent {
@@ -99,7 +115,8 @@ export interface EditorResult {
     | "generate_selection"
     | "history_back"
     | "history_forward"
-    | "remap_scale";
+    | "remap_scale"
+    | "reanalyze";
   notes: MidiNote[];
   key: string;
   scale: Scale;
@@ -124,6 +141,7 @@ export interface EditorResult {
   regionStylePreset: StylePreset;
   regionTightenPhrasing: boolean;
   regionSeed: number;
+  matchProject: boolean;
   remapToKey?: string;
   remapToScale?: Scale;
 }

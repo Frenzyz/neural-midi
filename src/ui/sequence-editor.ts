@@ -45,6 +45,31 @@ function segButtons(
     .join("")}</div>`;
 }
 
+function projectSourceLabel(source: string | undefined): string {
+  switch (source) {
+    case "live-scale":
+      return "Live scale";
+    case "midi-analysis":
+      return "MIDI analysis";
+    case "mixed":
+      return "Live + MIDI";
+    default:
+      return "Defaults";
+  }
+}
+
+function projectBadge(state: SequenceState): string {
+  const confidence = state.projectConfidence ?? 0;
+  const pct = Math.round(confidence * 100);
+  const source = projectSourceLabel(state.projectSource);
+  const clips = state.analyzedClipCount ?? 0;
+  const dim = confidence < 0.35;
+  return `<div class="project-badge${dim ? " dim" : ""}" id="projectBadge" title="Inferred from ${clips} session clip(s)">
+    <span class="project-badge-source">${source}</span>
+    <span class="project-badge-conf">${pct}% match</span>
+  </div>`;
+}
+
 function chordLane(labels: string[], bars: number): string {
   const chips = Array.from({ length: bars }, (_, i) => {
     const label = labels[i] ?? "—";
@@ -245,6 +270,7 @@ function collectBase() {
     regionStylePreset: segValue("styleSeg") || "expressive",
     regionTightenPhrasing: document.getElementById("tightenPhrasing").checked,
     regionSeed: Number(document.getElementById("seed").value),
+    matchProject: document.getElementById("matchProject").checked,
     tempo: state.tempo,
     timeSignature: state.timeSignature,
   };
@@ -634,6 +660,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("histFwd").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "history_forward" }); };
   document.getElementById("generate").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "generate_all" }); };
   document.getElementById("generateSel").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "generate_selection" }); };
+  document.getElementById("reanalyze").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "reanalyze" }); };
   document.getElementById("apply").onclick = () => { stopPreview(); sendClose({ ...collectBase(), action: "apply" }); };
   document.getElementById("deleteNote").onclick = () => { deleteSelectedNote(); };
   document.addEventListener("keydown", (e) => {
@@ -680,6 +707,11 @@ document.addEventListener("DOMContentLoaded", () => {
     </div>
     <div class="wiz-meta">
       <div style="font-size:11px;color:#a9a5bc;margin-bottom:6px">${tempoBpm} BPM · ${timeSigLabel}</div>
+      ${projectBadge(state)}
+      <label style="display:block;margin-top:6px;font-size:11px">
+        <input type="checkbox" id="matchProject"${state.matchProject !== false ? " checked" : ""} /> Match project
+      </label>
+      <button class="wiz-btn" id="reanalyze" type="button" style="margin-top:6px;width:100%">Re-analyze</button>
       <div>Expression <span id="exprVal">${(state.expression ?? 0.3).toFixed(2)}</span></div>
       <input type="range" id="expression" min="0" max="1" step="0.05" value="${state.expression ?? 0.3}" style="width:120px" />
       <div style="margin-top:4px">Temp <span id="tempVal">${state.temperature.toFixed(2)}</span></div>

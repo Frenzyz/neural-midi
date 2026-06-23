@@ -113,6 +113,14 @@ export const WIZARD_CSS = `
   }
   .gen-logo svg { width: 88px; height: 88px; display: block; }
   .wiz-meta { text-align: right; font-size: 10px; color: var(--text-dim); }
+  .project-badge {
+    display: flex; justify-content: space-between; gap: 8px;
+    padding: 4px 8px; margin-bottom: 6px;
+    background: rgba(95, 90, 162, 0.2); border: 1px solid var(--gunmetal);
+    border-radius: 4px; font-size: 10px; color: var(--text-primary);
+  }
+  .project-badge.dim { opacity: 0.65; }
+  .project-badge-conf { color: var(--dusty-grape); font-weight: 600; }
   .wiz-meta input[type="range"] { accent-color: var(--dusty-grape); }
   .wiz-meta input[type="number"] {
     background: var(--shadow-grey); border: 1px solid var(--gunmetal);
