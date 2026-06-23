@@ -48,6 +48,19 @@ TARGET_SYNCOPATION_PCT = 35.0
 MAX_STREAK_OK = 8
 
 
+def configure_reward_weights(
+    *,
+    diversity: float | None = None,
+    entropy: float | None = None,
+) -> None:
+    """Override component weights (e.g. v9 reward pass emphasizing diversity)."""
+    global W_DIVERSITY, W_ENTROPY
+    if diversity is not None:
+        W_DIVERSITY = diversity
+    if entropy is not None:
+        W_ENTROPY = entropy
+
+
 def _clamp01(x: float) -> float:
     return float(max(0.0, min(1.0, x)))
 

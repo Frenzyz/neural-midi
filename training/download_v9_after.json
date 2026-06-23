@@ -1,0 +1,27 @@
+{
+  "genres": {
+    "pop": 4119,
+    "drill": 22,
+    "edm": 1989,
+    "ambient": 3176,
+    "rnb": 2300,
+    "house": 1506,
+    "lofi": 754,
+    "trap": 294
+  },
+  "sources": {
+    "MIDI-Unprocessed": 150,
+    "drill": 22,
+    "edm": 1989,
+    "giantmidi": 1500,
+    "guitarset": 360,
+    "house": 1506,
+    "jsb": 400,
+    "lmd": 1969,
+    "maestro": 1276,
+    "nottingham": 754,
+    "pop909": 2000,
+    "rnb": 1940,
+    "trap": 294
+  }
+}

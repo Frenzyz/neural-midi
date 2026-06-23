@@ -28,7 +28,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from genre_map import GENRES, NUM_GENRES, genre_for_source, genre_id_for_path
-from reward import REST, compute_melody_reward
+from reward import REST, compute_melody_reward, configure_reward_weights
 from train_melody import (
     GRID,
     HIDDEN,
@@ -297,8 +297,16 @@ def main() -> None:
     parser.add_argument("--beta", type=float, default=RWR_BETA)
     parser.add_argument("--reinforce-weight", type=float, default=REINFORCE_WEIGHT)
     parser.add_argument("--anti-repeat-weight", type=float, default=0.35)
+    parser.add_argument("--diversity-weight", type=float, default=None)
+    parser.add_argument("--entropy-weight", type=float, default=None)
     parser.add_argument("--no-balance-genres", action="store_true")
     args = parser.parse_args()
+
+    if args.diversity_weight is not None or args.entropy_weight is not None:
+        configure_reward_weights(
+            diversity=args.diversity_weight,
+            entropy=args.entropy_weight,
+        )
 
     midi_paths = sorted(args.data_dir.glob("*.mid*"))
     if not midi_paths:

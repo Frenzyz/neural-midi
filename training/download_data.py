@@ -5,7 +5,7 @@ Supported datasets (--datasets comma-separated):
   maestro      — MAESTRO v3.0.0 piano (CC BY-NC-SA 4.0)
   pop909       — POP909 pop songs with chords (research use)
   jsb          — Bach JSB chorales (public domain)
-  lmd          — Lakh clean MIDI subset with genre keyword routing
+  lmd          — Lakh clean MIDI + LMD-matched via MSD tagtraum LFMGD routing
   giantmidi    — GiantMIDI-Piano curated subset (Google Drive mirror)
   nottingham   — Nottingham folk melody MIDI (folk leads)
   guitarset    — GuitarSet lead-guitar JAMS → MIDI (R&B / soul leads)
@@ -29,6 +29,14 @@ import requests
 from tqdm import tqdm
 
 from genre_map import genre_for_source
+from msd_genre import (
+    GENRE_PREFIXES,
+    build_md5_genre_index,
+    classify_filename,
+    ensure_lmd_matched_index,
+    ensure_msd_assets,
+    md5_of_file,
+)
 
 MAESTRO_ZIP_URL = (
     "https://storage.googleapis.com/magentadata/datasets/maestro/v3.0.0/"
@@ -50,15 +58,6 @@ NOTTINGHAM_ZIP_URL = (
     "https://github.com/jukedeck/nottingham-dataset/archive/refs/heads/master.zip"
 )
 GUITARSET_ANNOTATION_URL = "https://zenodo.org/records/3371780/files/annotation.zip"
-
-# Filename keyword → source prefix (must match genre_map.SOURCE_TO_GENRE keys)
-LMD_GENRE_RULES: list[tuple[str, list[str]]] = [
-    ("drill", ["drill", "pop smoke", "chief keef", "uk drill", "slide", "wooski"]),
-    ("trap", ["trap", "808", "migos", "travis scott", "future", "young thug", "gucci mane"]),
-    ("house", ["house", "deep house", "tech house", "disco house", "afro house"]),
-    ("edm", ["edm", "electro", "trance", "dubstep", "techno", "avicii", "skrillex", "deadmau5"]),
-    ("rnb", ["rnb", "r&b", "r and b", "soul", "neo soul", "neosoul", "usher", "beyonce"]),
-]
 
 SAFE_STEM = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -102,12 +101,12 @@ def copy_tree_midi(src: Path, dest: Path, max_files: int, prefix: str) -> int:
     return count
 
 
-def classify_lmd_filename(name: str) -> str:
-    lower = name.lower()
-    for prefix, keywords in LMD_GENRE_RULES:
-        if any(kw in lower for kw in keywords):
-            return prefix
-    return "lmd"
+def purge_prior_lmd_genre_files(midi_dir: Path) -> None:
+    """Remove prior LMD genre-routed copies before a fresh MSD routing pass."""
+    for path in midi_dir.glob("*.mid*"):
+        prefix = path.name.split("_", 1)[0]
+        if prefix in GENRE_PREFIXES:
+            path.unlink()
 
 
 def fetch_maestro(raw_dir: Path, midi_dir: Path, max_files: int) -> int:
@@ -150,7 +149,9 @@ def fetch_jsb(raw_dir: Path, midi_dir: Path, max_files: int) -> int:
 
 
 def fetch_lmd_clean(raw_dir: Path, midi_dir: Path, max_per_genre: int) -> dict[str, int]:
-    """Lakh clean MIDI tar with filename keyword routing into genre prefixes."""
+    """Lakh MIDI routed by MSD tagtraum LFMGD tags (with filename fallback)."""
+    purge_prior_lmd_genre_files(midi_dir)
+
     tar_path = raw_dir / "clean_midi.tar.gz"
     download(LMD_CLEAN_TAR_URL, tar_path)
     extract_dir = raw_dir / "clean_midi"
@@ -162,22 +163,61 @@ def fetch_lmd_clean(raw_dir: Path, midi_dir: Path, max_per_genre: int) -> dict[s
             tf.extractall(extract_dir)
         marker.touch()
 
-    counts: dict[str, int] = {prefix: 0 for prefix, _ in LMD_GENRE_RULES}
-    counts["lmd"] = 0
+    scores_path, cls_path = ensure_msd_assets(raw_dir)
+    md5_genre = build_md5_genre_index(scores_path, cls_path)
 
-    midi_files = sorted(extract_dir.rglob("*.mid")) + sorted(extract_dir.rglob("*.midi"))
-    for path in tqdm(midi_files, desc="LMD genre routing"):
-        prefix = classify_lmd_filename(path.name)
+    genre_keys = [g for g in GENRE_PREFIXES if g != "lmd"]
+    counts: dict[str, int] = {prefix: 0 for prefix in genre_keys}
+    counts["lmd"] = 0
+    used_md5: set[str] = set()
+
+    def try_copy(src: Path, prefix: str, stem: str, md5: str | None = None) -> bool:
         if counts[prefix] >= max_per_genre:
-            continue
-        stem = SAFE_STEM.sub("_", path.stem)[:80]
+            return False
+        if md5 and md5 in used_md5:
+            return False
         target = midi_dir / f"{prefix}_{stem}.mid"
         if target.exists():
             counts[prefix] += 1
-            continue
-        safe_copy(path, target)
+            if md5:
+                used_md5.add(md5)
+            return True
+        safe_copy(src, target)
         counts[prefix] += 1
+        if md5:
+            used_md5.add(md5)
+        return True
 
+    # Pass 1: clean_midi — MSD MD5 lookup, then filename keyword fallback.
+    midi_files = sorted(extract_dir.rglob("*.mid")) + sorted(extract_dir.rglob("*.midi"))
+    for path in tqdm(midi_files, desc="LMD clean MSD routing"):
+        md5 = md5_of_file(path)
+        prefix = md5_genre.get(md5)
+        if prefix is None:
+            prefix = classify_filename(path.name)
+        if prefix is None:
+            if counts["lmd"] >= max_per_genre:
+                continue
+            prefix = "lmd"
+        stem = SAFE_STEM.sub("_", path.stem)[:80]
+        try_copy(path, prefix, stem, md5 if prefix != "lmd" else None)
+
+    # Pass 2: supplement thin genres from LMD-matched when below cap.
+    need_supplement = any(counts[g] < max_per_genre for g in genre_keys)
+    if need_supplement:
+        matched_index = ensure_lmd_matched_index(raw_dir)
+        for md5, genre in tqdm(md5_genre.items(), desc="LMD-matched MSD supplement"):
+            if counts[genre] >= max_per_genre:
+                continue
+            if md5 in used_md5:
+                continue
+            src = matched_index.get(md5)
+            if src is None:
+                continue
+            stem = md5[:16]
+            try_copy(src, genre, stem, md5)
+
+    print("  lmd: MSD routing counts:", {k: counts[k] for k in genre_keys})
     return counts
 
 
