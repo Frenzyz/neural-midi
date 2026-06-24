@@ -5,10 +5,15 @@ Offline Python pipeline: download MAESTRO, train chord-conditioned GRU, export `
 ## Contents
 
 - `download_data.py` — Fetches MAESTRO v3.0.0, extracts subset → `training/data/midi/`, writes `manifest.csv`
+  - `jsb` — 403 Bach chorales (ambient)
+  - `bach_wtc` — Well-Tempered Clavier I+II via ksnortum GitHub releases
+  - `bach` — Mutopia BachJS keyboard works (inventions, suites, …)
+  - `classical` — Mutopia Mozart/Beethoven/Chopin/Haydn/… + classtab guitar leads
 - `train_melody.py` — Monophonic reduction, per-bar chord labels, GRU training, ONNX export
 - `reward.py` — Scalar melody reward (rest, diversity, entropy, interval, syncopation, anti-repeat)
 - `train_reward.py` — RWR + REINFORCE fine-tune from a `.pt` checkpoint → new ONNX (e.g. v6→v7)
 - `eval_generation.py` — Compare generated vs dataset metrics per genre
+- `docs/classical-melody-craft.md` — Bach/classical craft notes tied to pipeline
 - `requirements.txt` — torch, pretty_midi, numpy, requests, tqdm, onnx
 - `data/` — Gitignored training data (`midi/`, `maestro_raw/`, `manifest.csv`)
 

@@ -22,7 +22,7 @@ import pretty_midi
 
 # Reuse training extraction / genre mapping
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from genre_map import GENRES, genre_for_source, genre_id_for_path  # noqa: E402
+from genre_map import GENRES, genre_for_source, genre_id_for_path, source_from_filename  # noqa: E402
 from train_melody import (  # noqa: E402
     GRID,
     POSITIONS,
@@ -86,10 +86,7 @@ def mulberry32(seed: int):
 
 
 def source_from_path(path: str) -> str:
-    stem = Path(path).name
-    if "_" in stem:
-        return stem.split("_", 1)[0].lower()
-    return "maestro"
+    return source_from_filename(path)
 
 
 def extract_excerpt(path: Path, bars: int = 4, start_bar: int = 0) -> Excerpt | None:

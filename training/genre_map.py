@@ -22,6 +22,11 @@ SOURCE_TO_GENRE: dict[str, str] = {
     "lmd": "pop",
     "maestro": "ambient",
     "jsb": "ambient",
+    # Bach WTC, Mutopia Bach keyboard works, and classical masters → ambient
+    # (same genre bucket as maestro/jsb; enriches stepwise motion + cadences)
+    "bach": "ambient",
+    "bach_wtc": "ambient",
+    "classical": "ambient",
     "giantmidi": "ambient",
     "nottingham": "lofi",
     "guitarset": "rnb",
@@ -34,11 +39,19 @@ SOURCE_TO_GENRE: dict[str, str] = {
 }
 
 
+def source_from_filename(filename: str) -> str:
+    """Resolve dataset source prefix; longest match wins (e.g. bach_wtc before bach)."""
+    name = filename.rsplit("/", 1)[-1]
+    for prefix in sorted(SOURCE_TO_GENRE, key=len, reverse=True):
+        if name.startswith(f"{prefix}_"):
+            return prefix
+    return name.split("_", 1)[0].lower()
+
+
 def genre_for_source(source: str) -> str:
     return SOURCE_TO_GENRE.get(source.lower(), "pop")
 
 
 def genre_id_for_path(path: str) -> int:
-    stem = path.rsplit("/", 1)[-1]
-    source = stem.split("_", 1)[0].lower()
+    source = source_from_filename(path)
     return GENRE_TO_IDX[genre_for_source(source)]

@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from genre_map import NUM_GENRES, genre_id_for_path
+from genre_map import NUM_GENRES, genre_id_for_path, source_from_filename
 
 VOCAB = 13  # 12 pitch classes + REST
 REST = 12
@@ -36,6 +36,8 @@ REST_TRANSITION_OVERSAMPLE = 3
 REST_CLASS_WEIGHT = 2.5
 ANTI_REPEAT_WEIGHT = 0.35
 REGISTER_AUG_SHIFTS = (-2, -1, 1, 2)
+# Classical sources: train on highest-voice (soprano / RH melody) only
+LEAD_ONLY_SOURCES = frozenset({"jsb", "bach", "bach_wtc", "classical"})
 
 CHORD_TEMPLATES = [
     ("major", [0, 4, 7]),
@@ -172,6 +174,63 @@ def extract_polyphonic_pairs(pm: pretty_midi.PrettyMIDI, max_beats: float = 16.0
     return pairs
 
 
+def extract_lead_pairs(pm: pretty_midi.PrettyMIDI, max_beats: float = 16.0):
+    """Top-voice (highest pitch) monophonic stream — for Bach/classical sources."""
+    if not pm.instruments:
+        return []
+
+    raw_notes = sorted(
+        (n for inst in pm.instruments for n in inst.notes if not inst.is_drum),
+        key=lambda n: (n.start, -n.pitch),
+    )
+    if len(raw_notes) < MIN_ACTIVE_STEPS:
+        return []
+
+    notes = normalize_notes_to_grid(raw_notes)
+    end = min(max_beats, max(n.end for n in notes))
+    if end < GRID * MIN_ACTIVE_STEPS:
+        return []
+
+    steps = int(end / GRID) + 1
+    beats_per_bar = 4.0
+    stream: list[int] = []
+    chord_roots: list[int] = []
+    chord_quals: list[int] = []
+    positions: list[int] = []
+
+    for step in range(steps):
+        t = step * GRID
+        bar = int(t // beats_per_bar)
+        beat_in_bar = t % beats_per_bar
+        voices = voices_at_time(notes, t)
+        top = voices[0] if voices else REST
+        stream.append(top if top != REST else REST)
+
+        bar_start = bar * beats_per_bar
+        bar_notes = [n for n in notes if n.start < bar_start + beats_per_bar and n.end > bar_start]
+        pcs = sorted({n.pitch % 12 for n in bar_notes})
+        chord = detect_chord(pcs)
+        root, qual = chord if chord else (0, 0)
+        chord_roots.append(root)
+        chord_quals.append(qual)
+        positions.append(min(POSITIONS - 1, int((beat_in_bar / beats_per_bar) * POSITIONS)))
+
+    if not stream_is_creative(stream):
+        return []
+
+    pairs: list[tuple[int, int, int, int, int]] = []
+    for i in range(1, len(stream)):
+        prev_t, next_t = stream[i - 1], stream[i]
+        if prev_t == REST and next_t == REST:
+            continue
+        pairs.append((prev_t, next_t, chord_roots[i], chord_quals[i], positions[i]))
+    return pairs
+
+
+def source_prefix_from_path(path: str) -> str:
+    return source_from_filename(path)
+
+
 def _oversample_rest_transitions(
     pairs: list[tuple[int, int, int, int, int]],
 ) -> list[tuple[int, int, int, int, int]]:
@@ -202,7 +261,11 @@ class MelodyDataset(Dataset):
             genre_id = genre_id_for_path(str(path))
             try:
                 pm = pretty_midi.PrettyMIDI(str(path))
-                pairs = extract_polyphonic_pairs(pm)
+                source = source_prefix_from_path(str(path))
+                if source in LEAD_ONLY_SOURCES:
+                    pairs = extract_lead_pairs(pm)
+                else:
+                    pairs = extract_polyphonic_pairs(pm)
                 if not pairs:
                     skipped += 1
                     continue

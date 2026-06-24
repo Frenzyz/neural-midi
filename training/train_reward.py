@@ -27,15 +27,17 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from genre_map import GENRES, NUM_GENRES, genre_for_source, genre_id_for_path
+from genre_map import GENRES, NUM_GENRES, genre_for_source, genre_id_for_path, source_from_filename
 from reward import REST, compute_melody_reward, configure_reward_weights
 from train_melody import (
     GRID,
     HIDDEN,
+    LEAD_ONLY_SOURCES,
     POSITIONS,
     MelodyStepModel,
     anti_repetition_loss,
     export_onnx,
+    extract_lead_pairs,
     load_checkpoint_partial,
     stream_is_creative,
 )
@@ -50,10 +52,7 @@ ROLLOUT_TEMPERATURE = 0.9
 
 
 def source_from_path(path: str) -> str:
-    stem = Path(path).name
-    if "_" in stem:
-        return stem.split("_", 1)[0].lower()
-    return "maestro"
+    return source_from_filename(path)
 
 
 def extract_streams_with_rewards(pm: pretty_midi.PrettyMIDI, path: str, max_beats: float = 16.0):
@@ -104,6 +103,21 @@ def extract_streams_with_rewards(pm: pretty_midi.PrettyMIDI, path: str, max_beat
         positions.append(min(POSITIONS - 1, int((beat_in_bar / beats_per_bar) * POSITIONS)))
 
     out: list[tuple] = []
+    source = source_from_path(path)
+    if source in LEAD_ONLY_SOURCES:
+        lead_pairs = extract_lead_pairs(pm, max_beats=max_beats)
+        if lead_pairs:
+            stream = []
+            for p in lead_pairs:
+                if not stream:
+                    stream.append(p[0])
+                stream.append(p[1])
+            pitches = [t for t in stream if t != REST]
+            key_pc = Counter(pitches).most_common(1)[0][0] if pitches else 0
+            r = compute_melody_reward(stream, genre, key_pc)
+            out.append((lead_pairs, r))
+        return out
+
     for stream in streams:
         if not stream_is_creative(stream):
             continue

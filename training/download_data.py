@@ -5,6 +5,9 @@ Supported datasets (--datasets comma-separated):
   maestro      — MAESTRO v3.0.0 piano (CC BY-NC-SA 4.0)
   pop909       — POP909 pop songs with chords (research use)
   jsb          — Bach JSB chorales (public domain)
+  bach_wtc     — Bach Well-Tempered Clavier I+II (ksnortum LilyPond, PD)
+  bach         — Bach keyboard works via Mutopia (inventions, suites, PD/CC)
+  classical    — Mozart, Beethoven, Chopin, Haydn, etc. via Mutopia (PD/CC)
   lmd          — Lakh clean MIDI + LMD-matched via MSD tagtraum LFMGD routing
   giantmidi    — GiantMIDI-Piano curated subset (Google Drive mirror)
   nottingham   — Nottingham folk melody MIDI (folk leads)
@@ -12,23 +15,25 @@ Supported datasets (--datasets comma-separated):
   egmd         — alias for guitarset (legacy flag)
 
 Example:
-  python training/download_data.py --datasets maestro,pop909,jsb,giantmidi,nottingham,lmd,guitarset --max-per-dataset 2000
+  python training/download_data.py --datasets maestro,pop909,jsb,bach_wtc,bach,classical --max-per-dataset 2000
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import html
 import re
 import shutil
 import tarfile
 import zipfile
 from pathlib import Path
+from urllib.parse import urljoin
 
 import requests
 from tqdm import tqdm
 
-from genre_map import genre_for_source
+from genre_map import genre_for_source, source_from_filename
 from msd_genre import (
     GENRE_PREFIXES,
     build_md5_genre_index,
@@ -58,8 +63,30 @@ NOTTINGHAM_ZIP_URL = (
     "https://github.com/jukedeck/nottingham-dataset/archive/refs/heads/master.zip"
 )
 GUITARSET_ANNOTATION_URL = "https://zenodo.org/records/3371780/files/annotation.zip"
+# Bach WTC — LilyPond engravings, public-domain compositions (GitHub releases)
+BACH_WTC_REPOS = (
+    ("bach-well-tempered-1", "v0.3"),
+    ("bach-well-tempered-2", "v0.1"),
+)
+# Mutopia Project — PD/CC sheet-music MIDI previews (composer FTP trees)
+MUTOPIA_BASE = "https://www.mutopiaproject.org/ftp"
+MUTOPIA_BACH_DIRS = ("BachJS",)
+MUTOPIA_CLASSICAL_DIRS = (
+    "MozartWA",
+    "BeethovenLv",
+    "ChopinFF",
+    "HaydnF",
+    "SchubertF",
+    "SchumannR",
+    "Brahms",
+    "LisztF",
+    "GriegE",
+    "DebussyC",
+)
+CLASSTAB_ZIP_URL = "https://www.classtab.org/zip/classtab.zip"
 
 SAFE_STEM = re.compile(r"[^A-Za-z0-9._-]+")
+HREF_RE = re.compile(r'href="([^"]+)"')
 
 
 def download(url: str, dest: Path) -> None:
@@ -353,6 +380,150 @@ def fetch_guitarset(raw_dir: Path, midi_dir: Path, max_files: int) -> int:
     return count
 
 
+def _list_mutopia_entries(url: str) -> list[tuple[str, bool]]:
+    """Return (name, is_dir) from an Apache directory index."""
+    resp = requests.get(url, timeout=120)
+    resp.raise_for_status()
+    entries: list[tuple[str, bool]] = []
+    for match in HREF_RE.finditer(resp.text):
+        name = html.unescape(match.group(1))
+        if name in {".", "..", "/ftp/", "?C=N;O=D", "?C=M;O=A", "?C=S;O=A", "?C=D;O=A"}:
+            continue
+        if name.startswith("?") or name.startswith("/"):
+            continue
+        is_dir = name.endswith("/")
+        entries.append((name.rstrip("/"), is_dir))
+    return entries
+
+
+def fetch_mutopia_tree(
+    raw_dir: Path,
+    midi_dir: Path,
+    composer_dirs: tuple[str, ...],
+    prefix: str,
+    max_files: int,
+    cache_key: str,
+) -> int:
+    """Crawl Mutopia composer FTP trees and copy MIDI previews."""
+    cache_marker = raw_dir / f".mutopia_{cache_key}_done"
+    if cache_marker.exists():
+        existing = sum(1 for _ in midi_dir.glob(f"{prefix}_*.mid*"))
+        if existing >= max_files:
+            return min(existing, max_files)
+
+    count = sum(1 for _ in midi_dir.glob(f"{prefix}_*.mid*"))
+    queue: list[str] = [f"{MUTOPIA_BASE}/{d}/" for d in composer_dirs]
+    seen_urls: set[str] = set()
+
+    while queue and count < max_files:
+        url = queue.pop(0)
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        try:
+            entries = _list_mutopia_entries(url)
+        except Exception as err:
+            print(f"  {prefix}: skip {url} ({err})")
+            continue
+        for name, is_dir in entries:
+            if count >= max_files:
+                break
+            child = urljoin(url, name + ("/" if is_dir else ""))
+            if is_dir:
+                queue.append(child)
+                continue
+            if not name.lower().endswith((".mid", ".midi")):
+                continue
+            stem = SAFE_STEM.sub("_", Path(name).stem)[:72]
+            parent = Path(url.rstrip("/")).name
+            target = midi_dir / f"{prefix}_{parent}_{stem}.mid"
+            if target.exists():
+                count += 1
+                continue
+            try:
+                download(child, raw_dir / "mutopia_cache" / f"{prefix}_{parent}_{stem}.mid")
+                shutil.copy2(raw_dir / "mutopia_cache" / f"{prefix}_{parent}_{stem}.mid", target)
+                count += 1
+            except Exception as err:
+                print(f"  {prefix}: failed {child} ({err})")
+
+    cache_marker.touch()
+    return count
+
+
+def fetch_bach_wtc(raw_dir: Path, midi_dir: Path, max_files: int) -> int:
+    """Well-Tempered Clavier I+II from ksnortum GitHub releases (PD compositions)."""
+    extract_dir = raw_dir / "bach_wtc"
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for repo, tag in BACH_WTC_REPOS:
+        api = f"https://api.github.com/repos/ksnortum/{repo}/releases/tags/{tag}"
+        try:
+            resp = requests.get(api, timeout=60, headers={"Accept": "application/vnd.github+json"})
+            resp.raise_for_status()
+            assets = resp.json().get("assets", [])
+        except Exception as err:
+            print(f"  bach_wtc: release lookup failed for {repo} ({err})")
+            continue
+        for asset in assets:
+            if count >= max_files:
+                break
+            name = asset.get("name", "")
+            if not name.lower().endswith((".mid", ".midi")):
+                continue
+            url = asset["browser_download_url"]
+            stem = SAFE_STEM.sub("_", Path(name).stem)[:80]
+            target = midi_dir / f"bach_wtc_{stem}.mid"
+            if target.exists():
+                count += 1
+                continue
+            cached = extract_dir / name
+            download(url, cached)
+            shutil.copy2(cached, target)
+            count += 1
+    return count
+
+
+def fetch_bach_mutopia(raw_dir: Path, midi_dir: Path, max_files: int) -> int:
+    """Bach keyboard works (inventions, suites, etc.) from Mutopia BachJS tree."""
+    return fetch_mutopia_tree(
+        raw_dir, midi_dir, MUTOPIA_BACH_DIRS, "bach", max_files, "bach"
+    )
+
+
+def fetch_classical_mutopia(raw_dir: Path, midi_dir: Path, max_files: int) -> int:
+    """Classical masters piano/leads from Mutopia composer FTP trees."""
+    return fetch_mutopia_tree(
+        raw_dir, midi_dir, MUTOPIA_CLASSICAL_DIRS, "classical", max_files, "classical"
+    )
+
+
+def fetch_classtab(raw_dir: Path, midi_dir: Path, max_files: int, prefix: str = "classical") -> int:
+    """Supplement classical leads from classtab.org guitar arrangements (PD)."""
+    zip_path = raw_dir / "classtab.zip"
+    try:
+        download(CLASSTAB_ZIP_URL, zip_path)
+    except Exception as err:
+        print(f"  classtab: download failed ({err}) — skipped")
+        return 0
+    extract_dir = raw_dir / "classtab"
+    if not extract_dir.exists():
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(extract_dir)
+    count = sum(1 for _ in midi_dir.glob(f"{prefix}_classtab_*.mid*"))
+    for path in sorted(extract_dir.rglob("*.mid")):
+        if count >= max_files:
+            break
+        stem = SAFE_STEM.sub("_", path.stem)[:72]
+        target = midi_dir / f"{prefix}_classtab_{stem}.mid"
+        if target.exists():
+            count += 1
+            continue
+        shutil.copy2(path, target)
+        count += 1
+    return count
+
+
 def write_manifest(midi_dir: Path, data_dir: Path) -> None:
     manifest = data_dir / "manifest.csv"
     genre_counts: dict[str, int] = {}
@@ -361,7 +532,7 @@ def write_manifest(midi_dir: Path, data_dir: Path) -> None:
         writer = csv.writer(f)
         writer.writerow(["midi_path", "source", "genre"])
         for path in sorted(midi_dir.glob("*.mid*")):
-            source = path.name.split("_", 1)[0]
+            source = source_from_filename(path.name)
             genre = genre_for_source(source)
             genre_counts[genre] = genre_counts.get(genre, 0) + 1
             source_counts[source] = source_counts.get(source, 0) + 1
@@ -378,7 +549,7 @@ def main() -> None:
         "--datasets",
         type=str,
         default="maestro,pop909,jsb",
-        help="Comma-separated: maestro,pop909,jsb,lmd,giantmidi,nottingham,guitarset,egmd",
+        help="Comma-separated: maestro,pop909,jsb,bach_wtc,bach,classical,lmd,giantmidi,nottingham,guitarset,egmd",
     )
     parser.add_argument("--max-per-dataset", type=int, default=2000)
     args = parser.parse_args()
@@ -405,6 +576,28 @@ def main() -> None:
             totals["jsb"] = fetch_jsb(raw_dir, midi_dir, min(args.max_per_dataset, 400))
         except Exception as err:
             print(f"  jsb: failed ({err})")
+    if "bach_wtc" in datasets:
+        try:
+            totals["bach_wtc"] = fetch_bach_wtc(raw_dir, midi_dir, min(args.max_per_dataset, 120))
+        except Exception as err:
+            print(f"  bach_wtc: failed ({err})")
+    if "bach" in datasets:
+        try:
+            totals["bach"] = fetch_bach_mutopia(
+                raw_dir, midi_dir, min(args.max_per_dataset, 600)
+            )
+        except Exception as err:
+            print(f"  bach: failed ({err})")
+    if "classical" in datasets:
+        try:
+            totals["classical"] = fetch_classical_mutopia(
+                raw_dir, midi_dir, min(args.max_per_dataset, 800)
+            )
+            totals["classical_classtab"] = fetch_classtab(
+                raw_dir, midi_dir, min(args.max_per_dataset, 200)
+            )
+        except Exception as err:
+            print(f"  classical: failed ({err})")
     if "lmd" in datasets:
         try:
             lmd_counts = fetch_lmd_clean(raw_dir, midi_dir, args.max_per_dataset)
