@@ -64,6 +64,7 @@ function editorStateFromDialog(dialog: EditorResult, prev: SequenceState): Seque
     chordMode: dialog.chordMode,
     generationMode: dialog.generationMode,
     articulation: dialog.articulation,
+    melodicTechniqueMode: dialog.melodicTechniqueMode,
     selectionStart: dialog.selectionStart,
     selectionEnd: dialog.selectionEnd,
     useRegionSettings: dialog.useRegionSettings,
@@ -106,6 +107,7 @@ function buildGenerationParams(
     chordProgression,
     generationMode: dialog.generationMode,
     articulation: dialog.articulation,
+    melodicTechniqueMode: dialog.melodicTechniqueMode,
     generationIndex,
   };
 }
@@ -255,6 +257,7 @@ export function activate(activation: ActivationContext): void {
         chordMode: "same-track",
         generationMode: initialProgression.length > 0 ? "hybrid" : "melody",
         articulation: "lead",
+        melodicTechniqueMode: "auto",
         chordLabels: chordLabelsPerBar(initialProgression, 4, beatsPerBar),
         generationHistory: history.snapshots,
         historyIndex: history.index,

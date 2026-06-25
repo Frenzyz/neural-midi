@@ -1,5 +1,6 @@
 import type { ChordEvent, ChordQuality, Genre, MidiNote, Scale } from "./types.js";
 import { QUALITY_TO_INDEX } from "./types.js";
+import { voicingPitchesForStyle, type VoicingStyle } from "./melodic-modes.js";
 import { NOTE_TO_PC, SCALE_INTERVALS } from "./melody-engine.js";
 import { genreEntry } from "./genre-library.js";
 import { quantizeBeat } from "./melody-engine.js";
@@ -204,12 +205,15 @@ export function voiceLeadVoicing(
   chord: ChordEvent,
   prevPitches: number[],
   centerMidi = 58,
+  voicingStyle: VoicingStyle = "color",
 ): number[] {
   const candidates: number[][] = [];
   for (let shift = -12; shift <= 12; shift += 12) {
-    candidates.push(chordVoicingPitches(chord, centerMidi + shift, true));
+    candidates.push(voicingPitchesForStyle(chord, voicingStyle, centerMidi + shift));
   }
-  if (!prevPitches.length) return candidates[0] ?? chordVoicingPitches(chord, centerMidi, true);
+  if (!prevPitches.length) {
+    return candidates[0] ?? voicingPitchesForStyle(chord, voicingStyle, centerMidi);
+  }
   const prevCenter = prevPitches.reduce((a, b) => a + b, 0) / prevPitches.length;
   let best = candidates[0]!;
   let bestCost = Infinity;
@@ -230,11 +234,12 @@ export interface ChordVoicingOptions {
   progression: ChordEvent[];
   articulation?: "lead" | "pluck";
   rng?: () => number;
+  voicingStyle?: VoicingStyle;
 }
 
 /** Block / rhythm chord MIDI for Chords mode. */
 export function generateChordVoicings(options: ChordVoicingOptions): MidiNote[] {
-  const { beatsPerBar, bars, progression, articulation = "lead" } = options;
+  const { beatsPerBar, bars, progression, articulation = "lead", voicingStyle = "color" } = options;
   const rng = options.rng ?? (() => 0.5);
   const notes: MidiNote[] = [];
   let prevVoicing: number[] = [];
@@ -244,7 +249,7 @@ export function generateChordVoicings(options: ChordVoicingOptions): MidiNote[] 
     const chord = chordAtBeat(progression, barStart);
     if (!chord) continue;
 
-    const voicing = voiceLeadVoicing(chord, prevVoicing, 58 + (bar % 2) * 2);
+    const voicing = voiceLeadVoicing(chord, prevVoicing, 58 + (bar % 2) * 2, voicingStyle);
     prevVoicing = voicing;
     const pluck = articulation === "pluck";
     const hits = pluck ? [0, 1, 2, 3] : [0, 2];
@@ -275,6 +280,7 @@ export function generateHybridAccompaniment(
   bars: number,
   articulation: "lead" | "pluck" = "lead",
   rng: () => number = () => 0.5,
+  voicingStyle: VoicingStyle = "color",
 ): MidiNote[] {
   const notes: MidiNote[] = [];
   let prevVoicing: number[] = [];
@@ -284,7 +290,7 @@ export function generateHybridAccompaniment(
     const chord = chordAtBeat(progression, barStart);
     if (!chord) continue;
 
-    const voicing = voiceLeadVoicing(chord, prevVoicing, 52);
+    const voicing = voiceLeadVoicing(chord, prevVoicing, 52, voicingStyle);
     prevVoicing = voicing;
 
     const hitTimes = articulation === "pluck" ? [0, 1, 2, 3] : [0, 1.5, 2.5];

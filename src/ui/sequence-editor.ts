@@ -22,6 +22,27 @@ const GENRES: [string, string][] = [
   ["ambient", "Ambient"],
 ];
 
+const TECHNIQUE_MODES: [string, string][] = [
+  ["auto", "Auto (from chords)"],
+  ["bright", "Bright"],
+  ["melancholy", "Melancholy"],
+  ["tension", "Tension"],
+  ["hopeful", "Hopeful"],
+  ["mystery", "Mystery"],
+  ["triumphant", "Triumphant"],
+  ["intimate", "Intimate"],
+];
+
+const TECHNIQUE_LABELS = {
+  bright: "Bright",
+  melancholy: "Melancholy",
+  tension: "Tension",
+  hopeful: "Hopeful",
+  mystery: "Mystery",
+  triumphant: "Triumphant",
+  intimate: "Intimate",
+};
+
 function options(values: [string, string][], selected: string): string {
   return values
     .map(([v, l]) => `<option value="${v}"${v === selected ? " selected" : ""}>${l}</option>`)
@@ -218,6 +239,31 @@ function deleteSelectedNote() {
   redraw();
 }
 
+function inferTechniqueFromLabel(label) {
+  if (!label || label === "—") return "bright";
+  if (label.endsWith("dim")) return "tension";
+  if (label.endsWith("sus")) return "mystery";
+  if (label.endsWith("m7")) return "intimate";
+  if (label.endsWith("7")) return "tension";
+  if (label.endsWith("m")) return "melancholy";
+  return "bright";
+}
+
+function updateTechniqueHint() {
+  const sel = document.getElementById("techniqueMode");
+  const hint = document.getElementById("techniqueHint");
+  if (!sel || !hint) return;
+  if (sel.value !== "auto") {
+    hint.textContent = TECHNIQUE_LABELS[sel.value] || sel.value;
+    return;
+  }
+  const labels = state.chordLabels || [];
+  const bar = selectedBars[0] ?? 0;
+  const chord = labels[bar] ?? labels[0] ?? "—";
+  const inferred = inferTechniqueFromLabel(chord);
+  hint.textContent = "Auto → " + (TECHNIQUE_LABELS[inferred] || inferred) + (chord !== "—" ? " (from " + chord + ")" : "");
+}
+
 function collectBase() {
   const range = barsToBeatRange(selectedBars, BEATS_PER_BAR);
   return {
@@ -234,6 +280,7 @@ function collectBase() {
     chordMode: document.getElementById("chordMode").value,
     generationMode: segValue("modeSeg"),
     articulation: segValue("typeSeg"),
+    melodicTechniqueMode: document.getElementById("techniqueMode").value,
     selectionStart: range.start,
     selectionEnd: range.end,
     useRegionSettings: false,
@@ -472,6 +519,7 @@ function selectBar(bar, extend) {
     selectedBars = [b];
   }
   syncSelectionFromBars();
+  updateTechniqueHint();
   redraw();
 }
 
@@ -608,6 +656,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const exprVal = document.getElementById("exprVal");
   expr.addEventListener("input", () => { exprVal.textContent = Number(expr.value).toFixed(2); });
 
+  const techniqueMode = document.getElementById("techniqueMode");
+  techniqueMode.addEventListener("change", updateTechniqueHint);
+  updateTechniqueHint();
+
   setupSeg("modeSeg");
   setupSeg("typeSeg");
   setupSeg("styleSeg");
@@ -669,6 +721,9 @@ document.addEventListener("DOMContentLoaded", () => {
         ${segButtons("lengthSeg", [["4", "4 BARS"], ["8", "8 BARS"]], String(state.bars === 8 ? 8 : 4))}</div>
       <div class="wiz-row"><span class="wiz-label">STYLE</span>
         ${segButtons("styleSeg", [["clean", "CLEAN"], ["expressive", "EXPR"], ["dense", "DENSE"]], state.stylePreset ?? "expressive")}</div>
+      <div class="wiz-row"><span class="wiz-label">TECHNIQUE</span>
+        <select class="wiz-select" id="techniqueMode" style="width:100%">${options(TECHNIQUE_MODES, state.melodicTechniqueMode ?? "auto")}</select>
+        <div id="techniqueHint" style="font-size:10px;color:#a9a5bc;margin-top:4px"></div></div>
     </div>
     <div class="gen-nav">
       <div class="gen-row">

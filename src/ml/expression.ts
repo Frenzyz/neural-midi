@@ -1,5 +1,7 @@
 import type { GenerationParams, StylePreset } from "./types.js";
 import { genreInferencePriors } from "./genre-library.js";
+import { getTechniqueProfile, mergeModeIntoParams, resolveTechniqueMode } from "./melodic-modes.js";
+import type { ContourPreference, VoicingStyle } from "./melodic-modes.js";
 import { toNumber } from "../util/coerce.js";
 
 export interface ExpressionKnobs {
@@ -21,6 +23,14 @@ export interface ExpressionKnobs {
   scaleLockStrength: number;
   durationChoices: number[];
   durationWeights: number[];
+  /** Resolved technique mode (after `auto`). */
+  resolvedTechniqueMode: Exclude<import("./types.js").MelodicTechniqueMode, "auto">;
+  contour: ContourPreference;
+  voicingStyle: VoicingStyle;
+  cadenceStrength: number;
+  maxLeap: number;
+  intervalStepBias: number;
+  velocityBias: number;
 }
 
 const DEFAULT_EXPRESSION = 0.5;
@@ -44,11 +54,14 @@ export function resolveRigidity(params: GenerationParams): number {
 }
 
 export function resolveExpression(params: GenerationParams): ExpressionKnobs {
-  const expression = Math.max(0, Math.min(1, toNumber(params.expression, DEFAULT_EXPRESSION)));
-  const style = params.stylePreset ?? DEFAULT_STYLE;
-  const temperature = Math.max(0.1, toNumber(params.temperature, 0.7));
-  const rigidity = resolveRigidity(params);
-  const genre = genreInferencePriors(params.genre);
+  const merged = mergeModeIntoParams(params);
+  const expression = Math.max(0, Math.min(1, toNumber(merged.expression, DEFAULT_EXPRESSION)));
+  const style = merged.stylePreset ?? DEFAULT_STYLE;
+  const temperature = Math.max(0.1, toNumber(merged.temperature, 0.7));
+  const rigidity = resolveRigidity(merged);
+  const genre = genreInferencePriors(merged.genre);
+  const resolvedTechniqueMode = resolveTechniqueMode(merged);
+  const technique = getTechniqueProfile(resolvedTechniqueMode);
 
   let restResampleProb = 0.08 + expression * 0.22;
   let repeatPitchPenalty = 2.0 + expression * 2.0;
@@ -99,12 +112,22 @@ export function resolveExpression(params: GenerationParams): ExpressionKnobs {
     genre.scaleLockStrength * (0.55 + rigidity * 0.45),
   );
 
+  const stepBlend = technique.intervalStepBias;
+  const adjustedRepeatPenalty =
+    repeatPitchPenalty *
+    genre.repeatPitchPenaltyMult *
+    technique.repeatPitchPenaltyMult *
+    (0.75 + stepBlend * 0.5);
+  const adjustedRestProb =
+    restResampleProb * genre.restResampleMult * technique.restResampleMult;
+  const adjustedHarmony = harmonyDensity * technique.harmonyDensityMult;
+
   return {
-    restResampleProb: restResampleProb * genre.restResampleMult,
-    repeatPitchPenalty: repeatPitchPenalty * genre.repeatPitchPenaltyMult,
+    restResampleProb: adjustedRestProb,
+    repeatPitchPenalty: adjustedRepeatPenalty,
     sustainRepeatPenalty,
     maxMelodyNoteDuration: Math.max(1.0, maxMelodyNoteDuration),
-    harmonyDensity,
+    harmonyDensity: adjustedHarmony,
     hybridAccompaniment,
     ghostNoteChance,
     sampleTemperature: Math.max(0.1, sampleTemperature),
@@ -115,5 +138,12 @@ export function resolveExpression(params: GenerationParams): ExpressionKnobs {
     scaleLockStrength,
     durationChoices: genre.durationChoices,
     durationWeights: genre.durationWeights,
+    resolvedTechniqueMode,
+    contour: technique.contour,
+    voicingStyle: technique.voicingStyle,
+    cadenceStrength: technique.cadenceStrength,
+    maxLeap: technique.maxLeap,
+    intervalStepBias: technique.intervalStepBias,
+    velocityBias: technique.velocityBias,
   };
 }

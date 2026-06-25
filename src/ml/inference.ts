@@ -72,6 +72,7 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
       bars,
       progression,
       articulation,
+      voicingStyle: expr.voicingStyle,
     });
     const notes = applyFinalGrid(
       postProcessMelody(chordNotes, { ...params, chordProgression: progression }, {
@@ -128,6 +129,7 @@ export async function generateMelody(params: GenerationParams): Promise<Generati
       bars,
       articulation,
       rng,
+      expr.voicingStyle,
     );
     notes = postProcessHybrid(notes, accompaniment, { ...params, chordProgression: progression }, articulation);
     logNoteCount("hybrid-layer", notes);

@@ -4,7 +4,7 @@ Melody generation subsystem. ONNX-first with silent fallback to the rule-based s
 
 ## File Structure
 
-- `types.ts` — `MidiNote`, `GenerationParams`, `Scale`, `Genre`, `ChordMode`, `ChordEvent`
+- `types.ts` — `MidiNote`, `GenerationParams`, `Scale`, `Genre`, `ChordMode`, `ChordEvent`, `MelodicTechniqueMode`
 - `inference.ts` — Facade: `generateMelody()`, `loadModel()`; ONNX then stub
 - `melody-engine.ts` — Shared music theory: scales, genre rhythms, RNG, quantize
 - `stub.ts` — Rule-based phrase generator (key/scale/genre aware; version `stub-0.3.0`)
@@ -14,6 +14,18 @@ Melody generation subsystem. ONNX-first with silent fallback to the rule-based s
 - `tokenizer.ts` — Vocab and one-hot encodings (must match Python training)
 - `chords.ts` — Chord detection from polyphonic MIDI
 - `session-chords.ts` — Live session traversal → `ChordEvent[]` progression
+- `melodic-modes.ts` — Emotion/technique modes from chord quality & CRs (Tabletop Composer; Juslin PMC3764399)
+
+## Melodic technique modes
+
+`MelodicTechniqueMode` (`auto`, `bright`, `melancholy`, `tension`, `hopeful`, `mystery`, `triumphant`, `intimate`) shapes inference without retraining:
+
+- **Auto** — weighted vote from `chordProgression` qualities; major→minor by major third biases melancholy (M III m CR)
+- **Per-mode knobs** — interval step bias, rest density, voicing style (`close`/`open`/`shell`/`color`), contour, cadence strength, max leap
+- **Integration** — `resolveExpression()` merges technique with genre/style; `post-process.ts` applies contour + cadence; `chords.ts` voicing for Hybrid/Chords modes
+- **UI** — Technique dropdown in sequence editor (`melodicTechniqueMode` on `GenerationParams`)
+
+Sources (summarized in code, not reproduced): [Tabletop Composer chord relationships](https://www.tabletopcomposer.com/post/chord-relationships-and-emotion); Juslin & Västfjäll (2008) via [PMC3764399](https://pmc.ncbi.nlm.nih.gov/articles/PMC3764399/).
 
 ## Key Abstractions
 

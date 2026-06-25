@@ -14,6 +14,7 @@ import {
 } from "./melody-engine.js";
 import { resolveTimeSignature, toNumber } from "../util/coerce.js";
 import { resolveExpression, resolveRigidity } from "./expression.js";
+import { applyContourBias } from "./melodic-modes.js";
 
 export type GenerationMode = "chords" | "hybrid" | "melody";
 export type ArticulationType = "lead" | "pluck";
@@ -416,19 +417,8 @@ export function postProcessMelody(
       bars,
       allowEmptyBars: params.stylePreset === "clean",
       pitchChangeEveryBeats: rigidity >= 0.7 ? 1.5 : 2.5,
-      maxLeap: mode === "hybrid" ? 10 : 12,
+      maxLeap: resolveExpression(params).maxLeap,
     });
-  }
-
-  if (processed.length > 1 && mode === "melody") {
-    const lead = processed
-      .filter((n) => n.velocity >= 60)
-      .sort((a, b) => a.startTime - b.startTime);
-    const last = lead[lead.length - 1] ?? processed[processed.length - 1]!;
-    const intervals = SCALE_INTERVALS[params.scale] ?? SCALE_INTERVALS.major;
-    const scalePitches = buildScalePitches(rootPc, intervals, 48, 84);
-    last.pitch = cadencePitch(scalePitches, rootPc, intervals, last.pitch);
-    if (last.pitch < 55) last.pitch += 12;
   }
 
   if (mode !== "chords") {
@@ -439,6 +429,17 @@ export function postProcessMelody(
       48,
       84,
     );
+    const totalBeats = bars * beatsPerBar;
+    processed = applyContourBias(processed, expr.contour, totalBeats, scalePitches, 0.3);
+    if (expr.velocityBias !== 0) {
+      processed = processed.map((n) => {
+        if (n.velocity < LEAD_VELOCITY_MIN) return n;
+        return {
+          ...n,
+          velocity: Math.max(40, Math.min(127, n.velocity + expr.velocityBias)),
+        };
+      });
+    }
     processed = splitOversustainedNotes(
       processed,
       expr.maxMelodyNoteDuration,
@@ -446,6 +447,19 @@ export function postProcessMelody(
       2.0,
     );
     processed = enforceScaleAdherence(processed, params.key, params.scale);
+  }
+
+  if (mode === "melody" && processed.length > 1) {
+    const expr = resolveExpression(params);
+    const lead = processed
+      .filter((n) => n.velocity >= 60)
+      .sort((a, b) => a.startTime - b.startTime);
+    const last = lead[lead.length - 1] ?? processed[processed.length - 1]!;
+    const intervals = SCALE_INTERVALS[params.scale] ?? SCALE_INTERVALS.major;
+    const scalePitches = buildScalePitches(rootPc, intervals, 48, 84);
+    last.pitch = cadencePitch(scalePitches, rootPc, intervals, last.pitch);
+    if (last.pitch < 55 && expr.cadenceStrength > 0.5) last.pitch += 12;
+    last.velocity = Math.min(127, last.velocity + Math.round(expr.cadenceStrength * 8));
   }
 
   return processed;

@@ -39,6 +39,20 @@ export type ArticulationType = "lead" | "pluck";
 /** Generation style preset — controls density at sample time, not post-delete. */
 export type StylePreset = "clean" | "expressive" | "dense";
 
+/**
+ * Melodic technique / emotion mode — shapes contour, voicing, and sampling bias.
+ * `auto` derives from chord quality and progression (Tabletop Composer CRs).
+ */
+export type MelodicTechniqueMode =
+  | "auto"
+  | "bright"
+  | "melancholy"
+  | "tension"
+  | "hopeful"
+  | "mystery"
+  | "triumphant"
+  | "intimate";
+
 export interface ChordEvent {
   startBeat: number;
   duration: number;
@@ -69,6 +83,8 @@ export interface GenerationParams {
   rigidity?: number;
   /** History index for variety rotation (set by inference). */
   generationIndex?: number;
+  /** Emotion-informed melodic technique; default `auto`. */
+  melodicTechniqueMode?: MelodicTechniqueMode;
 }
 
 export interface GenerationResult {
